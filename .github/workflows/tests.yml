@@ -1,0 +1,13 @@
+name: Windows tests
+on: [push, pull_request, workflow_dispatch]
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: PowerShell 5.1 integration tests
+        shell: powershell
+        run: |
+          Install-Module Pester -RequiredVersion 5.7.1 -Force -Scope CurrentUser -SkipPublisherCheck
+          Import-Module Pester -RequiredVersion 5.7.1
+          Invoke-Pester -Path ./tests -CI
