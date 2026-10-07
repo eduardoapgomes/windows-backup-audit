@@ -9,6 +9,7 @@ Describe 'CLI configuration in a fresh Windows PowerShell process' {
         # Isolate config binding and CLI invocation; no physical disk or backup is touched.
         @'
 function Assert-BackupDependencies { param($Mode) }
+function New-BackupConfiguration { param($Path) Write-Output ('SETUP:' + $Path) }
 function Select-BackupDestination { param($Sources) 'E:\Chosen' }
 function Invoke-BackupPlan {
     param($Sources, $Destination, $Mode)
@@ -18,6 +19,11 @@ Export-ModuleMember -Function *
 '@ | Set-Content -LiteralPath (Join-Path $fixture 'src\Backup.Core.psm1') -Encoding UTF8
         '{"Destination":"","Sources":[{"Id":"DEFAULT","Path":"C:\\Data"}]}' |
             Set-Content -LiteralPath (Join-Path $fixture 'backup.local.json') -Encoding UTF8
+    }
+    It 'routes setup to the script-local configuration without starting a backup' {
+        $output = & powershell.exe -NoProfile -STA -File "$fixture\Backup.ps1" -Setup
+        $LASTEXITCODE | Should -Be 0
+        ($output -join '') | Should -Be "SETUP:$fixture\backup.local.json"
     }
     It 'loads the default config beside the script with -File and -SelectDestination' {
         $output = & powershell.exe -NoProfile -STA -File "$fixture\Backup.ps1" -Mode Audit -SelectDestination
@@ -41,6 +47,6 @@ Export-ModuleMember -Function *
         } finally { $ErrorActionPreference = $previous }
         $code | Should -Be 2
         ($output -join '') | Should -Match 'backup.local.json'
-        ($output -join '') | Should -Match 'backup.example.json'
+        ($output -join '') | Should -Match 'Iniciar.cmd'
     }
 }

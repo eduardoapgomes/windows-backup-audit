@@ -52,6 +52,7 @@ function Assert-ExternalDestination {
         $identity.VolumeId -ne $ExpectedIdentity.VolumeId)) { throw 'O disco de destino foi trocado ou desconectado.' }
     foreach ($source in $Sources) {
         $sourceDisk = Get-StorageIdentity $source -Source
+        if ([string]::IsNullOrWhiteSpace($sourceDisk.DiskId)) { throw "Identidade do disco de origem não confirmada: $source" }
         if ($sourceDisk.DiskId -eq $identity.DiskId) { throw 'Origem e destino estão no mesmo disco físico.' }
     }
     return $identity
