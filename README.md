@@ -35,7 +35,7 @@ O console informa descoberta, enumeração, indexação, cálculo SHA-256, arqui
 
 O **ANDAMENTO.html** abre no início e atualiza a cada 10 segundos. Seus dados são gravados aproximadamente a cada 5 segundos enquanto a execução avança, inclusive durante o hash de arquivos grandes. O inventário CSV é incremental. Ao concluir, a página encaminha ao relatório final, inclusive quando há erros. Verifique o horário da última atualização: uma interrupção não vira sucesso.
 
-O **LEIA-ME.html** agora tem tabelas reais, totais, maiores arquivos, pendências e cobertura. Não depende de Pandoc. Zero erros só significa que não houve falha registrada dentro do escopo; não prova cobertura de todo o computador.
+O **LEIA-ME.html** agora tem tabelas reais, totais, maiores arquivos, categorias de documentos/Python/Jupyter, pendências e cobertura. Não depende de Pandoc. Zero erros só significa que não houve falha registrada dentro do escopo; não prova cobertura de todo o computador.
 
 **Auditoria automática:**
 
@@ -57,7 +57,7 @@ Pastas e arquivos com marcadores Cloud Files são aceitos **somente como origem*
 
 Se aparecer **“Arquivo em nuvem não disponível localmente”**, no Explorador clique com o botão direito na pasta do OneDrive, escolha **Sempre manter neste dispositivo** e aguarde a conclusão do download. Isso usa espaço no disco de origem. Depois execute a auditoria novamente. O programa verifica atributos antes de ler e registra arquivos indisponíveis como erro; não baixa conteúdo deliberadamente nem considera esses arquivos protegidos pelo backup. Um provedor concorrente pode alterar o estado entre a verificação e a leitura; veja `docs/SAFETY.md`.
 
-### Comandos separados (sem menu)
+### Comandos do modo manual (sem menu)
 
 Configuração inicial por janelas, somente se ainda não tiver `backup.local.json`:
 
@@ -183,7 +183,7 @@ Depois repita o bloco de auditoria ou backup escolhido. Políticas de organizaç
 
 Os relatórios ficam em `DESTINO\_RELATORIOS\ID_EXECUCAO`. Abra `LEIA-ME.html` para revisão guiada, `LEIA-ME.md`, `resumo.json`, `inventario.csv` e, se existir, `erros.txt`. O destino tem um lock exclusivo para impedir execuções simultâneas. Não há `/MIR`, `/PURGE`, exclusão da origem nem envio automático a IA.
 
-Configure as raízes explicitamente. Uma raiz de disco como `D:\` pode ser auditada, mas diretórios protegidos/reparse geram erros. Um perfil completo pode conter junctions: nesses casos selecione separadamente as pastas reais. `Audit` não descobre sozinho todos os discos ou aplicativos. Veja [cobertura](docs/COVERAGE.md).
+No modo manual, configure as raízes explicitamente. Uma raiz de disco como `D:\` pode ser auditada, mas diretórios protegidos/reparse geram erros. Um perfil completo pode conter junctions: nesses casos selecione separadamente as pastas reais. `Audit -AutoDiscover` descobre volumes internos e pastas pessoais; sem essa opção, vale somente a configuração manual. Aplicativos ainda podem exigir exportações próprias. Veja [cobertura](docs/COVERAGE.md).
 
 ## Testes
 

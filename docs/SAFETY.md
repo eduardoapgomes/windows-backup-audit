@@ -50,3 +50,12 @@ Referências da implementação:
 - https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-fscc/c8e77b37-3909-4fe6-a4ea-2b9d423b1ee4
 - https://learn.microsoft.com/en-us/windows/win32/fileio/file-attribute-constants
 - https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew
+
+
+## Varredura automática e acompanhamento
+
+-AutoDiscover expande o escopo para volumes internos habilitados, inclusive o volume de sistema como origem. Isso não altera as regras de destino: gravar em mídia interna continua bloqueado. As raízes, exclusões e falhas da descoberta são persistidas em plano.json/cobertura.csv. Links ou pastas inacessíveis são registrados em falhas-enumeracao.csv e as demais subárvores continuam; qualquer falha deixa a execução incompleta. Não há elevação automática nem alteração de ACLs.
+
+ANDAMENTO.html e andamento.json são snapshots parciais, atualizados aproximadamente a cada 5 segundos enquanto a execução avança; o navegador recarrega a página a cada 10 segundos. O horário pode ficar parado durante I/O bloqueado, remoção da mídia ou interrupção. Somente o relatório final permite avaliar o resultado da execução, e mesmo ele não autoriza formatação. Os CSVs são incrementais e não constituem uma confirmação de cobertura enquanto o processo estiver em execução. SHA-256 é calculado em blocos para informar leitura de arquivos grandes; a porcentagem é por arquivo, não do conjunto ainda desconhecido.
+
+Referência das pastas conhecidas do Windows: https://learn.microsoft.com/en-us/windows/win32/shell/knownfolderid

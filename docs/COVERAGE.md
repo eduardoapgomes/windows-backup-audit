@@ -13,9 +13,10 @@
 | SQL/Postgres/MySQL/SQLite | Backup nativo consistente, não apenas arquivo do banco ativo |
 | Certificados/EFS/BitLocker/MFA | Export/recovery conforme produto; armazenamento separado e teste |
 | Navegadores/licenças | Exportar favoritos, conferir conta/sync/reativação; perfil não garante senhas portáveis |
+| Anaconda/Jupyter/Python | .conda, .jupyter, .ipython, notebooks e instalações no perfil permanecem na varredura. Preserve environment.yml/requirements.txt e teste a reconstrução dos ambientes. Instalações em Program Files seguem a exclusão de software; trabalhos salvos ali exigem inclusão manual. |
 | Git | Conferir branches/commits locais, untracked, submodules e LFS |
 
-O motor modular copia arquivos explicitamente configurados. As integrações automáticas mais amplas do relatório permanecem na referência experimental. Esta tabela exige revisão humana e não promete cobertura universal.
+O modo automático (-AutoDiscover) varre volumes internos com letra, inclusive C:\\ e Users, com exclusões explícitas de Windows, programas e metadados do sistema. Também descobre pastas pessoais redirecionadas. Users, AppData e ProgramData não são excluídos em bloco. O modo manual continua disponível para escopos específicos. Ambos usam a mesma proteção de destino USB e verificação por conteúdo. Rede, volumes sem letra, dados inacessíveis e exportações próprias dos aplicativos não são cobertos automaticamente. Esta tabela exige revisão humana e não promete cobertura universal.
 
 Fontes primárias para revisão:
 - https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/robocopy

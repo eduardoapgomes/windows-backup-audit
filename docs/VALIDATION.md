@@ -1,11 +1,17 @@
 # Validação
 
-Em 07/10/2026, **36 testes passaram, 0 falhas, 0 ignorados**, em Windows Server 2025 com Windows PowerShell 5.1 e Robocopy real.
+Em 07/10/2026, **47 testes passaram, 0 falhas, 0 ignorados**, em Windows Server 2025 com Windows PowerShell 5.1 e Robocopy real.
 
-- Commit de código testado: 1b291dba21a2bfc05de33b669b679ef5b42ad80c
-- Execução: https://github.com/eduardoapgomes/windows-backup-audit/actions/runs/37659221795
+- Commit de código testado: 112d1cd1bb535c26a673eb5747c2287a8f42a0de
+- Execução: https://github.com/eduardoapgomes/windows-backup-audit/actions/runs/37673392742
 
 ## Cobertura executada
+
+- Descoberta automática com metadados simulados: volumes internos de sistema/dados incluídos; USB excluído como origem; pastas redirecionadas, consolidação de raízes, identificadores estáveis e falhas de descoberta registradas.
+- Enumeração com junction real: continuação pelas demais pastas e respeito a exclusões explícitas; destino continua interrompendo diante de índice incompleto.
+- SHA-256 em blocos: arquivos vazio e de múltiplos blocos comparados com Get-FileHash; eventos intermediários de progresso verificados.
+- Relatório HTML: tabelas, totais, cobertura, arquivos grandes e escape de caminhos; snapshots parciais com contadores, atualização e encaminhamento ao relatório final.
+- CLI automática com e sem configuração manual, sem sobrescrever a configuração existente.
 
 - Política física com metadados simulados: USB distinto permitido; interno/sistema, partição no mesmo disco, readonly, identidade alterada, identificação ausente, erro de leitura e formato incompatível bloqueados.
 - Cloud Files: 16 tags permitidas somente em origens; tags desconhecidas bloqueadas; leitura nativa de metadados; arquivos offline/recall rejeitados antes do hash; falhas registradas no relatório sem cópia.
@@ -19,7 +25,7 @@ Somente a política física é substituída por um mock nos testes de arquivos: 
 
 ## Validação manual necessária
 
-OneDrive real (arquivos locais e somente online), assistente gráfico de configuração, menu Iniciar.cmd, abertura do relatório no navegador, janela de seleção/cancelamento, acesso ao módulo Storage, reconhecimento do seu USB/NTFS, desconexão/troca física, bloqueio do disco interno no hardware real, caminhos longos e restauração dos seus documentos nos aplicativos originais. Não executar ensaios destrutivos sobre dados únicos.
+Varredura completa do computador do usuário, atualização automática do HTML no navegador, OneDrive real (arquivos locais e somente online), assistente gráfico de configuração, menu Iniciar.cmd, abertura do relatório no navegador, janela de seleção/cancelamento, acesso ao módulo Storage, reconhecimento do seu USB/NTFS, desconexão/troca física, bloqueio do disco interno no hardware real, caminhos longos e restauração dos seus documentos nos aplicativos originais. Não executar ensaios destrutivos sobre dados únicos.
 
 A referência da pesquisa foi renomeada para Research-Backup.ps1.txt e não é ponto de entrada executável do projeto. Não houve validação integral daquele texto.
 
