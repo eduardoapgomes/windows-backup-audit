@@ -110,3 +110,32 @@ Describe 'Readable HTML report' {
         $html | Should -Not -Match '<script>|<pre>|\*\*Audit\*\*'
     }
 }
+
+Describe 'Partial reports' {
+    It 'saves live counters with an explicit partial status and then links to the final report' {
+        $run=New-Item -ItemType Directory (Join-Path $TestDrive 'partial-live')
+        InModuleScope Backup.Core -Parameters @{RunPath=$run.FullName} {
+            param($RunPath)
+            Mock Assert-ExternalDestination { @{DiskId='test';VolumeId='test'} }
+            Start-BackupProgress Audit
+            try {
+                $script:BackupProgress.Run=$RunPath
+                $script:BackupProgress.Identity=@{DiskId='test';VolumeId='test'}
+                $script:BackupProgress.SourcePaths=@('C:\')
+                $script:BackupProgress.AuditFiles=12
+                $script:BackupProgress.AuditBytes=1024
+                $script:BackupProgress.Results=@{NEEDS_COPY=12}
+                Write-BackupPartial -Phase 'Hash' -Path 'C:\<script>.bin' -ReadBytes 4MB -TotalBytes 9MB
+                $json=Get-Content "$RunPath\andamento.json" -Raw | ConvertFrom-Json
+                $json.InventoriedFiles | Should -Be 12
+                $json.ReadBytes | Should -Be 4MB
+                $json.Status | Should -Match '^PARCIAL'
+                $html=Get-Content "$RunPath\ANDAMENTO.html" -Raw
+                $html | Should -Match 'content="10"'
+                $html | Should -Not -Match '<script>'
+                Write-BackupPartial -Phase 'Encerrado' -Finished
+                Get-Content "$RunPath\ANDAMENTO.html" -Raw | Should -Match 'url=LEIA-ME.html'
+            } finally { Stop-BackupProgress }
+        }
+    }
+}

@@ -9,14 +9,31 @@ function Format-BackupSize {
     if ($Bytes -ge 1KB) { return ('{0:N2} KiB' -f ($Bytes/1KB)) }
     return "$Bytes bytes"
 }
+function Get-BackupCategory {
+    param([string]$Path)
+    $name=[IO.Path]::GetFileName($Path).ToLowerInvariant()
+    if ($name -in @('environment.yml','environment.yaml','requirements.txt','.condarc','pyproject.toml','pipfile','pipfile.lock','poetry.lock')) { return 'Configurações de ambientes Python/Conda' }
+    switch ([IO.Path]::GetExtension($Path).ToLowerInvariant()) {
+        '.ipynb' { return 'Notebooks Jupyter' }
+        '.py' { return 'Scripts Python' }
+        {$_ -in @('.pdf','.doc','.docx','.odt','.txt','.md','.tex')} { return 'Documentos e textos' }
+        {$_ -in @('.xls','.xlsx','.csv','.ods','.parquet','.json','.sqlite','.db')} { return 'Planilhas e dados' }
+        {$_ -in @('.jpg','.jpeg','.png','.tif','.tiff','.heic','.raw','.svg')} { return 'Imagens' }
+        {$_ -in @('.mp4','.mov','.mkv','.avi','.mp3','.wav','.flac')} { return 'Áudio e vídeo' }
+        default { return 'Outros arquivos' }
+    }
+}
 function Write-BackupHtml {
     param([string]$Run, [object[]]$Sources, [string]$Mode, [int]$Errors)
-    $counts=@{}; $sizes=@{}; $roots=@{}; $total=[long]0; $count=0
+    $counts=@{}; $sizes=@{}; $roots=@{}; $categories=@{}; $total=[long]0; $count=0
     $largest=@(); $failures=New-Object 'Collections.Generic.List[object]'
     $csv=Join-Path $Run 'inventario.csv'
     if (Test-Path -LiteralPath $csv) {
         Import-Csv -LiteralPath $csv | ForEach-Object {
             $row=$_; $size=[long]$row.Bytes; $total+=$size; $count++
+            $category=Get-BackupCategory $row.Source
+            if (-not $categories.ContainsKey($category)) { $categories[$category]=@{Files=0;Bytes=[long]0} }
+            $categories[$category].Files++; $categories[$category].Bytes+=$size
             if (-not $counts.ContainsKey($row.Status)) { $counts[$row.Status]=0; $sizes[$row.Status]=[long]0 }
             $counts[$row.Status]++; $sizes[$row.Status]+=$size
             if (-not $roots.ContainsKey($row.RootId)) { $roots[$row.RootId]=@{Count=0;Bytes=[long]0;Errors=0} }
@@ -87,6 +104,11 @@ function Write-BackupHtml {
         foreach ($row in $failures) { $null=$html.Append('<tr><td>'+(ConvertTo-BackupHtmlText $row.Path)+'</td><td>'+(ConvertTo-BackupHtmlText $row.Reason)+'</td></tr>') }
         $null=$html.Append('</tbody></table>')
     } else { $null=$html.Append('<p>Nenhuma pendência detalhada nos CSVs. Confira também erros.txt, se existir.</p>') }
+    $null=$html.Append('<h2>Organização por tipo de arquivo</h2><p>Classificação para revisão; os arquivos originais não são movidos nem renomeados. A extensão não prova o conteúdo.</p><table><tr><th>Categoria</th><th>Arquivos</th><th>Tamanho</th></tr>')
+    foreach ($category in ($categories.Keys | Sort-Object)) {
+        $null=$html.Append('<tr><td>'+(ConvertTo-BackupHtmlText $category)+'</td><td>'+$categories[$category].Files+'</td><td>'+(Format-BackupSize $categories[$category].Bytes)+'</td></tr>')
+    }
+    $null=$html.Append('</table>')
     $null=$html.Append('<h2>Maiores arquivos encontrados</h2><table><thead><tr><th>Arquivo</th><th>Tamanho</th></tr></thead><tbody>')
     foreach ($row in $largest) { $null=$html.Append('<tr><td>'+(ConvertTo-BackupHtmlText $row.Source)+'</td><td>'+(Format-BackupSize ([long]$row.Bytes))+'</td></tr>') }
     $null=$html.Append('</tbody></table><h2>Próximos passos</h2><ol><li>Confira as pastas e exclusões acima; inclua manualmente o que estiver faltando.</li><li>Resolva as falhas. Para OneDrive somente online, escolha Sempre manter neste dispositivo e aguarde o download antes de repetir.</li><li>Após revisar a auditoria, execute Backup usando o mesmo modo de descoberta e a mesma pasta de destino.</li><li>Guarde inventario.csv: Destination aponta para a cópia real, inclusive quando reutilizada. Restaure uma amostra em uma pasta vazia e compare os arquivos.</li><li>Mantenha outra cópia independente dos dados críticos. Este relatório não autoriza formatação.</li></ol><h2>Arquivos da execução</h2><p><a href="inventario.csv">Inventário completo (CSV)</a> · <a href="LEIA-ME.md">Versão Markdown</a> · <a href="plano.json">Plano utilizado</a> · <a href="cobertura.csv">Cobertura (CSV)</a></p><p class="muted">Os relatórios contêm caminhos pessoais. Revise antes de compartilhar.</p></main></body></html>')

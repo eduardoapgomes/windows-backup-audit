@@ -57,7 +57,7 @@ function Get-BackupHash {
     $stream = [IO.File]::Open($Path, 'Open', 'Read', 'Read')
     $sha = [Security.Cryptography.SHA256]::Create()
     try {
-        $buffer = New-Object byte[] (4MB)
+        $buffer = New-Object byte[] ([int][Math]::Max(1, [Math]::Min(4MB, $stream.Length)))
         $readTotal = [long]0
         Show-BackupProgress -Phase 'Calculando SHA-256' -Path $Path -TotalBytes $stream.Length
         while (($read = $stream.Read($buffer, 0, $buffer.Length)) -gt 0) {
@@ -185,9 +185,13 @@ function Invoke-BackupPlan {
         $script:BackupProgress.Run=$run
         $script:BackupProgress.Identity=$identity
         $script:BackupProgress.SourcePaths=$sourcePaths
+        $script:BackupProgress.EnumerationIssues=$issues
         Write-Host "Acompanhamento parcial: $(Join-Path $run 'ANDAMENTO.html')"
         Write-BackupPartial -Phase 'Iniciando comparação' -Path $destinationPath
-        if ($OpenReport) { Start-Process -FilePath (Join-Path $run 'ANDAMENTO.html') }
+        if ($OpenReport) {
+            try { Start-Process -FilePath (Join-Path $run 'ANDAMENTO.html') }
+            catch { Write-Warning "Abra manualmente o acompanhamento em $run. O navegador não pôde ser iniciado." }
+        }
         Show-BackupProgress -Phase 'Indexando backup existente' -Path $destinationPath
         # Finish indexing the selected backup folder before copying anything.
         try { $index = Get-ExistingBackupIndex $destinationPath }
@@ -226,7 +230,7 @@ function Invoke-BackupPlan {
                         $null = Assert-ExternalDestination $csv $sourcePaths $identity
                         [pscustomobject]@{Source=$file.FullName; RelativePath=('.\' + $relative); RootId=$source.Id;
                             PlannedDestination=$target; Destination=$actual; Bytes=$file.Length;
-                            SHA256=$hash; Status=$status; Error=$message} |
+                            SHA256=$hash; Status=$status; Error=$message; Category=(Get-BackupCategory $file.FullName)} |
                             Export-Csv -LiteralPath $csv -Append -NoTypeInformation -Encoding UTF8 -ErrorAction Stop
                         $script:BackupProgress.AuditFiles++
                         $script:BackupProgress.AuditBytes += $file.Length
