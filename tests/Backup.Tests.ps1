@@ -1,10 +1,6 @@
 ﻿BeforeAll {
     Import-Module "$PSScriptRoot/../src/Backup.Core.psm1" -Force
-    function New-TestIdentity {
-        @{DiskId='usb-1';VolumeId='volume-1';DiskNumber=7;BusType='USB';
-          IsBoot=$false;IsSystem=$false;IsOffline=$false;IsReadOnly=$false;
-          FileSystem='NTFS';FreeBytes=100GB;Label='Test';Drive='E:\'}
-    }
+
 }
 Describe 'Physical destination policy (synthetic disk metadata)' {
     BeforeEach {
@@ -106,6 +102,23 @@ Describe 'File integration (temporary disk; physical guard mocked only here)' {
         @(Get-ChildItem $source -File).Count | Should -Be 2
         $again = Invoke-BackupPlan @(@{Id='docs';Path=$source}) $dest Backup
         @(Import-Csv "$again\inventario.csv" | Where-Object Status -eq VERIFIED).Count | Should -Be 0
+    }
+    It 'restores two logical paths from one reused object using the inventory' {
+        [IO.File]::WriteAllText("$source\a.txt", 'shared')
+        [IO.File]::WriteAllText("$source\b.txt", 'shared')
+        [IO.File]::WriteAllText("$dest\manual.txt", 'shared')
+        $run = Invoke-BackupPlan @(@{Id='docs';Path=$source}) $dest Backup
+        $rows = @(Import-Csv "$run\inventario.csv")
+        @($rows | Where-Object Status -eq REUSED_EXISTING).Count | Should -Be 2
+        Test-Path "$dest\docs" | Should -BeFalse
+        $restore = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory $restore | Out-Null
+        foreach ($row in $rows) {
+            $path = Join-Path $restore $row.RelativePath
+            Copy-Item -LiteralPath $row.Destination -Destination $path
+            Get-BackupHash $path | Should -Be $row.SHA256
+        }
+        @(Get-ChildItem $restore -File).Count | Should -Be 2
     }
     It 'detects corruption and preserves prior content on replacement' {
         [IO.File]::WriteAllText("$source\a.txt", 'AAAA')

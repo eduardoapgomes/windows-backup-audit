@@ -18,7 +18,7 @@ Um processo privilegiado hostil pode trocar caminhos entre uma checagem e um ace
 
 ## Cópias parciais/manuais
 
-O índice lista arquivos regulares sob a pasta selecionada; exclui relatórios, lock, staging e versões anteriores. Candidatos do mesmo tamanho são comparados por SHA-256, recalculado a cada decisão. Arquivo igual em outro caminho recebe REUSED_EXISTING e Destination aponta para a cópia real. Nenhum hard link é criado. Duplicatas preexistentes não são removidas.
+O índice lista arquivos regulares sob a pasta selecionada; exclui relatórios, lock, staging e versões anteriores. O índice usa tamanho + SHA-256, calculado uma vez na varredura inicial. Cada candidato reutilizado é revalidado por SHA-256 antes da decisão, evitando confiar apenas no índice. Arquivo igual em outro caminho recebe REUSED_EXISTING e Destination aponta para a cópia real. Nenhum hard link é criado. Duplicatas preexistentes não são removidas.
 
 O CSV é parte do backup: Source → Destination registra como reconstruir os caminhos. RelativePath começa com .\ para não virar fórmula ao abrir no Excel. Várias origens podem apontar para uma mesma cópia; não mova/apague essa cópia. O repositório precisa ser movido como conjunto com seus relatórios; os caminhos absolutos do CSV terão de ser ajustados para uma nova letra de disco na restauração. Não há restauração automatizada nesta versão.
 

@@ -87,7 +87,7 @@ function Get-ExistingBackupIndex {
     $index = @{}
     if (Test-Path -LiteralPath $Destination) {
         Get-BackupFiles $Destination -ExistingBackup | ForEach-Object {
-            $key = [string]$_.Length
+            $key = ([string]$_.Length) + '|' + (Get-BackupHash $_.FullName)
             if (-not $index.ContainsKey($key)) { $index[$key] = New-Object 'Collections.Generic.List[string]' }
             $index[$key].Add($_.FullName)
         }
@@ -97,7 +97,7 @@ function Get-ExistingBackupIndex {
 
 function Find-ExistingContent {
     param([string]$SourceHash, [long]$Length, [hashtable]$Index)
-    $key = [string]$Length
+    $key = ([string]$Length) + '|' + $SourceHash
     if ($Index.ContainsKey($key)) {
         foreach ($candidate in $Index[$key]) {
             # Rehash candidates on every decision; no trusted stale hash cache.
@@ -167,7 +167,7 @@ function Invoke-BackupPlan {
                                 $status = Copy-VerifiedFile $file.FullName $target (Join-Path $run 'robocopy.log') $identity
                                 if ((Get-BackupHash $target) -ne $hash) { throw 'A origem mudou desde a comparação; execute novamente.' }
                                 $actual = $target
-                                $key = [string]$file.Length
+                                $key = ([string]$file.Length) + '|' + $hash
                                 if (-not $index.ContainsKey($key)) { $index[$key] = New-Object 'Collections.Generic.List[string]' }
                                 $index[$key].Add($target)
                             }
