@@ -2,20 +2,91 @@
 
 Projeto pré-formatação baseado na pesquisa **Backup Windows com PowerShell: inventário profundo, deduplicação, segurança e verificação pré-formatação**, de 07/10/2026.
 
-## Início rápido
+## Guia para quem está começando
 
-Requisitos: Windows 10/11, Windows PowerShell 5.1, Robocopy e mídia externa acessível. Extraia o projeto em `C:\BackupWindows`. Abra PowerShell nessa pasta. Não copie o exemplo sem corrigir os caminhos.
+### 1. Dependências
+
+Windows 10/11 e Windows PowerShell 5.1 ou superior. O Robocopy acompanha o Windows e é necessário para copiar; o código verifica sua presença antes do modo Backup. O modo Audit não precisa dele.
+
+Git é necessário apenas para clonar e atualizar o projeto. Baixe o instalador em https://git-scm.com/download/win e abra uma nova janela do PowerShell depois da instalação. Pandoc, Python e Node.js não são necessários. Pester 5.7.1 é dependência apenas dos testes de desenvolvimento.
+
+### 2. Clonar o repositório
+
+Abra o menu Iniciar, procure **Windows PowerShell** e abra normalmente. Cole este bloco uma vez. Ele cria uma pasta Projetos no seu perfil e baixa o código público para ela:
 
 ```powershell
-cd C:\BackupWindows
+New-Item -ItemType Directory -Path "$env:USERPROFILE\Projetos" -Force | Out-Null
+cd "$env:USERPROFILE\Projetos"
+git clone https://github.com/eduardoapgomes/windows-backup-audit.git
+cd .\windows-backup-audit
+```
+
+Se a pasta já existe porque você clonou antes, use este bloco para atualizar, preservando sua configuração local:
+
+```powershell
+cd "$env:USERPROFILE\Projetos\windows-backup-audit"
+git pull --ff-only
+```
+
+Alternativa sem Git: no repositório, clique **Code → Download ZIP**, extraia o ZIP e abra o PowerShell na pasta que contém Backup.ps1.
+
+### 3. Configurar as pastas
+
+Conecte o disco de backup. Execute este bloco apenas na primeira configuração; depois edite backup.local.json diretamente para não sobrescrever suas escolhas:
+
+```powershell
+cd "$env:USERPROFILE\Projetos\windows-backup-audit"
 Copy-Item .\backup.example.json .\backup.local.json
 notepad .\backup.local.json
+```
+
+Em **Destination**, informe a pasta do disco externo. Em **Sources**, informe as pastas que quer examinar/copiar. Cada **Id** deve ser único. Exemplo JSON (substitua USUARIO e a letra E; barras invertidas em JSON são duplicadas):
+
+```json
+{
+  "Destination": "E:\\BACKUP_WINDOWS\\MEU-PC",
+  "Sources": [
+    {"Id": "01_DOCUMENTOS", "Path": "C:\\Users\\USUARIO\\Documents"},
+    {"Id": "02_DOWNLOADS", "Path": "C:\\Users\\USUARIO\\Downloads"}
+  ]
+}
+```
+
+Inclua outras pastas necessárias. Para saber o caminho real de uma pasta, abra-a no Explorador e copie a barra de endereço. Documentos/Área de Trabalho podem estar dentro do OneDrive. Selecione pastas reais em vez do perfil inteiro, que pode conter junctions. O destino deve ficar fora de todas as origens.
+
+### 4. Fazer somente a auditoria
+
+Este bloco gera inventário e relatório; **não copia seus arquivos**:
+
+```powershell
+cd "$env:USERPROFILE\Projetos\windows-backup-audit"
 .\Backup.ps1 -Mode Audit
-# Depois de revisar os caminhos e o inventário:
+```
+
+O console informa a pasta do relatório. Vá até ela e dê dois cliques em **LEIA-ME.html** para ler no navegador, sem instalar nada. Também há LEIA-ME.md, inventario.csv e resumo.json. Se houve erro, haverá erros.txt ou mensagens na coluna Error.
+
+O relatório lista as origens, quantidade, tamanho lógico, status, erros e passos de revisão. Abra inventario.csv no Excel para verificar os arquivos. **AUDITED significa encontrado, não salvo nem validado por hash.** Pastas não configuradas não foram examinadas. Uma pasta com erro pode ter sido examinada apenas parcialmente.
+
+Revise origens, arquivos esperados e erros antes de passar ao próximo bloco. Consulte [cobertura](docs/COVERAGE.md) para aplicativos e dados especiais.
+
+### 5. Fazer o backup de fato
+
+Execute separadamente, depois de revisar a auditoria:
+
+```powershell
+cd "$env:USERPROFILE\Projetos\windows-backup-audit"
 .\Backup.ps1 -Mode Backup
 ```
 
-Se a política impedir scripts, use uma política aprovada no seu computador; não desative proteções globalmente. O primeiro comando executável do ponto de entrada é `cd $PSScriptRoot`.
+Leia o **novo** LEIA-ME.html. VERIFIED significa cópia conferida por SHA-256; SKIP_IDENTICAL significa que o destino já tinha o conteúdo; ERROR exige correção. Em reexecuções, arquivos idênticos não são recopiados.
+
+Se o PowerShell bloquear scripts, consulte a política do computador; não desative proteções globalmente. Em computador pessoal, você pode usar RemoteSigned apenas nesta janela, se permitido:
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned
+```
+
+Depois repita o bloco de auditoria ou backup escolhido. Políticas de organização podem impedir essa alteração. O primeiro comando executável de Backup.ps1 é cd $PSScriptRoot.
 
 ## Comportamento
 
@@ -30,14 +101,14 @@ Se a política impedir scripts, use uma política aprovada no seu computador; n�
 | Arquivos iguais em locais diferentes | Preserva cada caminho |
 | Junction/symlink/placeholder | Interrompe essa raiz e exige revisão explícita |
 
-Os relatórios ficam em `DESTINO\_RELATORIOS\ID_EXECUCAO`. Abra `resumo.json`, `inventario.csv` e, se existir, `erros.txt`. O destino tem um lock exclusivo para impedir execuções simultâneas. Não há `/MIR`, `/PURGE`, exclusão da origem nem envio automático a IA.
+Os relatórios ficam em `DESTINO\_RELATORIOS\ID_EXECUCAO`. Abra `LEIA-ME.html` para revisão guiada, `LEIA-ME.md`, `resumo.json`, `inventario.csv` e, se existir, `erros.txt`. O destino tem um lock exclusivo para impedir execuções simultâneas. Não há `/MIR`, `/PURGE`, exclusão da origem nem envio automático a IA.
 
 Configure as raízes explicitamente. Uma raiz de disco como `D:\` pode ser auditada, mas diretórios protegidos/reparse geram erros. Um perfil completo pode conter junctions: nesses casos selecione separadamente as pastas reais. `Audit` não descobre sozinho todos os discos ou aplicativos. Veja [cobertura](docs/COVERAGE.md).
 
 ## Testes
 
 ```powershell
-cd C:\BackupWindows
+cd "$env:USERPROFILE\Projetos\windows-backup-audit"
 Install-Module Pester -RequiredVersion 5.7.1 -Scope CurrentUser -Force
 Invoke-Pester .\tests -Output Detailed
 ```

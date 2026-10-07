@@ -1,5 +1,6 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 Set-StrictMode -Version Latest
+. "$PSScriptRoot\Backup.Review.ps1"
 
 function Test-PathWithin {
     param([string]$Path, [string]$Root)
@@ -62,6 +63,8 @@ function Copy-VerifiedFile {
 
 function Invoke-BackupPlan {
     param([object[]]$Sources, [string]$Destination, [ValidateSet('Audit','Backup')][string]$Mode = 'Audit')
+    Assert-BackupDependencies -Mode $Mode
+    if (-not $Sources -or $Sources.Count -eq 0) { throw 'Configure pelo menos uma origem.' }
     $destinationPath = [IO.Path]::GetFullPath($Destination)
     $ids = New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
     foreach ($source in $Sources) {
@@ -110,9 +113,11 @@ function Invoke-BackupPlan {
         }
         [pscustomobject]@{Mode=$Mode; Errors=$errors; Report=$run; FormattingDecision='NOT_ASSESSED'} |
             ConvertTo-Json | Set-Content -LiteralPath (Join-Path $run 'resumo.json') -Encoding UTF8
+        Write-BackupReview -Run $run -Sources $Sources -Mode $Mode -Errors $errors
+        Write-Host "Relatório para revisão: $(Join-Path $run 'LEIA-ME.html')"
         if ($errors) { throw "$errors erro(s). Consulte $run" }
         return $run
     } finally { $lock.Dispose() }
 }
 
-Export-ModuleMember -Function Test-PathWithin, Get-BackupFiles, Get-BackupHash, Copy-VerifiedFile, Invoke-BackupPlan
+Export-ModuleMember -Function Assert-BackupDependencies, Write-BackupReview, Test-PathWithin, Get-BackupFiles, Get-BackupHash, Copy-VerifiedFile, Invoke-BackupPlan
