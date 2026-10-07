@@ -30,7 +30,7 @@ function Get-AutomaticBackupPlan {
                     -not $disk.IsOffline) {
                     $candidates.Add([pscustomobject]@{Path=$path;Kind='Varredura do volume interno (dados fora e dentro de Users)'})
                     foreach ($name in @('$RECYCLE.BIN','System Volume Information','Recovery','Windows','Program Files','Program Files (x86)','Boot','EFI','Config.Msi','pagefile.sys','swapfile.sys','hiberfil.sys','bootmgr','DumpStack.log','DumpStack.log.tmp')) {
-                        $exclusions.Add((Join-Path $path $name))
+                        $exclusions.Add(([IO.Path]::Combine($path, $name)))
                     }
                 } else {
                     $rows.Add([pscustomobject]@{Path=$path;Status='EXCLUDED';Reason='Mídia externa, volume offline ou tipo não habilitado. Não é origem automática.'})
@@ -40,7 +40,7 @@ function Get-AutomaticBackupPlan {
     } catch { $rows.Add([pscustomobject]@{Path='Volumes';Status='ERROR';Reason=$_.Exception.Message}) }
     $profile = [Environment]::GetFolderPath('UserProfile')
     if ($profile) {
-        foreach ($name in @('NTUSER.DAT','ntuser.dat.LOG1','ntuser.dat.LOG2')) { $exclusions.Add((Join-Path $profile $name)) }
+        foreach ($name in @('NTUSER.DAT','ntuser.dat.LOG1','ntuser.dat.LOG2')) { $exclusions.Add(([IO.Path]::Combine($profile, $name))) }
     }
     # Parents first; known folders outside the profile remain separate roots.
     foreach ($candidate in ($candidates | Sort-Object @{Expression={$_.Path.Length}},Path)) {
