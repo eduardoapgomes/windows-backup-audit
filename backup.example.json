@@ -1,0 +1,7 @@
+{
+  "Destination": "E:\\BACKUP_WINDOWS\\MEU-PC",
+  "Sources": [
+    {"Id": "01_USUARIO", "Path": "C:\\Users\\SEU_USUARIO"},
+    {"Id": "02_PROJETOS", "Path": "D:\\Projetos"}
+  ]
+}
