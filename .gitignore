@@ -1,0 +1,7 @@
+backup.local.json
+*.log
+*.csv
+*.pfx
+*.key
+*.zip
+__pycache__/
