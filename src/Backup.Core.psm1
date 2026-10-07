@@ -1,6 +1,7 @@
 ﻿#Requires -Version 5.1
 Set-StrictMode -Version Latest
 . "$PSScriptRoot\Backup.Review.ps1"
+. "$PSScriptRoot\Backup.Storage.ps1"
 
 function Test-PathWithin {
     param([string]$Path, [string]$Root)
@@ -11,38 +12,52 @@ function Test-PathWithin {
 }
 
 function Get-BackupFiles {
-    param([string]$Root)
+    param([string]$Root, [switch]$ExistingBackup)
+    Assert-PlainPath $Root
     $stack = New-Object 'Collections.Generic.Stack[string]'
     $stack.Push($Root)
     while ($stack.Count) {
-        $directory = $stack.Pop()
-        foreach ($item in Get-ChildItem -LiteralPath $directory -Force -ErrorAction Stop) {
+        foreach ($item in Get-ChildItem -LiteralPath $stack.Pop() -Force -ErrorAction Stop) {
+            if ($ExistingBackup -and ($item.Name -eq '_RELATORIOS' -or $item.Name -eq '.backup.lock' -or
+                $item.Name -like '.stage-*' -or $item.Name -like '.history-*')) { continue }
             if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
                 throw "Reparse point precisa de revisão/materialização: $($item.FullName)"
             }
-            if ($item.PSIsContainer) { $stack.Push($item.FullName) }
-            else { $item }
+            if ($item.PSIsContainer) { $stack.Push($item.FullName) } else { $item }
         }
     }
 }
 
 function Get-BackupHash {
     param([string]$Path)
-    (Get-FileHash -LiteralPath $Path -Algorithm SHA256 -ErrorAction Stop).Hash
+    Assert-PlainPath $Path
+    $stream = [IO.File]::Open($Path, 'Open', 'Read', 'Read')
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try { return [BitConverter]::ToString($sha.ComputeHash($stream)).Replace('-','') }
+    finally { $sha.Dispose(); $stream.Dispose() }
 }
 
 function Copy-VerifiedFile {
-    param([string]$Source, [string]$Destination, [string]$Log)
-    $before = Get-BackupHash $Source
-    if (Test-Path -LiteralPath $Destination) {
-        if ((Get-BackupHash $Destination) -eq $before) { return 'SKIP_IDENTICAL' }
-    }
-    $parent = Split-Path -Parent $Destination
-    New-Item -ItemType Directory -Path $parent -Force -ErrorAction Stop | Out-Null
-    # Stage in the same directory: replacement happens only after verification.
-    $stage = Join-Path $parent ('.stage-' + [guid]::NewGuid().ToString('N'))
-    New-Item -ItemType Directory -Path $stage -ErrorAction Stop | Out-Null
+    param([string]$Source, [string]$Destination, [string]$Log, [object]$ExpectedIdentity)
+    $identity = Assert-ExternalDestination $Destination @($Source) $ExpectedIdentity
+    Assert-PlainPath $Log
+    $logIdentity = Assert-ExternalDestination $Log @($Source) $identity
+    $null = $logIdentity
+    # A read-only shared handle prevents writers/deletion during copy and verification.
+    $sourceLock = [IO.File]::Open($Source, 'Open', 'Read', 'Read')
+    $stage = $null
     try {
+        $before = Get-BackupHash $Source
+        if (Test-Path -LiteralPath $Destination) {
+            if ((Get-BackupHash $Destination) -eq $before) { return 'SKIP_IDENTICAL' }
+        }
+        $length = (Get-Item -LiteralPath $Source -ErrorAction Stop).Length
+        if ($identity.FreeBytes -lt ($length + 16MB)) { throw 'Espaço insuficiente para staging e margem de segurança.' }
+        $parent = Split-Path -Parent $Destination
+        $null = Assert-ExternalDestination $parent @($Source) $identity
+        New-Item -ItemType Directory -Path $parent -Force -ErrorAction Stop | Out-Null
+        $stage = Join-Path $parent ('.stage-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $stage -ErrorAction Stop | Out-Null
         $arguments = @((Split-Path -Parent $Source), $stage, (Split-Path -Leaf $Source),
             '/COPY:DAT', '/Z', '/XJ', '/R:2', '/W:2', '/IS', '/IT', '/NP', "/LOG+:$Log")
         & robocopy.exe @arguments | Out-Null
@@ -51,67 +66,128 @@ function Copy-VerifiedFile {
         if ((Get-BackupHash $temporary) -ne $before -or (Get-BackupHash $Source) -ne $before) {
             throw 'Conteúdo mudou ou verificação falhou; destino anterior preservado.'
         }
+        $null = Assert-ExternalDestination $Destination @($Source) $identity
         if (Test-Path -LiteralPath $Destination) {
             $history = Join-Path $parent ('.history-' + [guid]::NewGuid().ToString('N'))
             [IO.File]::Replace($temporary, $Destination, $history)
         } else { [IO.File]::Move($temporary, $Destination) }
         return 'VERIFIED'
     } finally {
-        Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction Stop
+        $sourceLock.Dispose()
+        if ($stage) {
+            # A changed disk must never receive cleanup writes.
+            $null = Assert-ExternalDestination $stage @($Source) $identity
+            Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction Stop
+        }
     }
+}
+
+function Get-ExistingBackupIndex {
+    param([string]$Destination)
+    $index = @{}
+    if (Test-Path -LiteralPath $Destination) {
+        Get-BackupFiles $Destination -ExistingBackup | ForEach-Object {
+            $key = [string]$_.Length
+            if (-not $index.ContainsKey($key)) { $index[$key] = New-Object 'Collections.Generic.List[string]' }
+            $index[$key].Add($_.FullName)
+        }
+    }
+    return $index
+}
+
+function Find-ExistingContent {
+    param([string]$SourceHash, [long]$Length, [hashtable]$Index)
+    $key = [string]$Length
+    if ($Index.ContainsKey($key)) {
+        foreach ($candidate in $Index[$key]) {
+            # Rehash candidates on every decision; no trusted stale hash cache.
+            if ((Get-BackupHash $candidate) -eq $SourceHash) { return $candidate }
+        }
+    }
+    return $null
 }
 
 function Invoke-BackupPlan {
     param([object[]]$Sources, [string]$Destination, [ValidateSet('Audit','Backup')][string]$Mode = 'Audit')
     Assert-BackupDependencies -Mode $Mode
     if (-not $Sources -or $Sources.Count -eq 0) { throw 'Configure pelo menos uma origem.' }
-    $destinationPath = [IO.Path]::GetFullPath($Destination)
+    $sourcePaths = @($Sources | ForEach-Object { [string]$_.Path })
+    $identity = Assert-ExternalDestination $Destination $sourcePaths
+    $destinationPath = [IO.Path]::GetFullPath($Destination).TrimEnd('\')
+    if ($destinationPath -eq $identity.Drive.TrimEnd('\')) { throw 'Escolha uma pasta de backup, não a raiz do disco.' }
     $ids = New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
     foreach ($source in $Sources) {
-        if ($source.Id -notmatch '^[A-Za-z0-9_-]+$' -or -not $ids.Add($source.Id)) {
-            throw 'Cada origem precisa de Id único, contendo letras, números, _ ou -.'
+        if ($source.Id -notmatch '^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$' -or
+            $source.Id -match '^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$' -or -not $ids.Add($source.Id)) {
+            throw 'Id inválido/reservado ou repetido; use letras e números no início, depois _ ou -.'
         }
+        Assert-PlainPath $source.Path
         if (-not (Test-Path -LiteralPath $source.Path -PathType Container)) { throw "Origem ausente: $($source.Path)" }
-        $rootItem = Get-Item -LiteralPath $source.Path -Force
-        if ($rootItem.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Raiz reparse não permitida.' }
         if ((Test-PathWithin $destinationPath $source.Path) -or (Test-PathWithin $source.Path $destinationPath)) {
             throw 'Origem e destino precisam ser árvores independentes.'
         }
     }
+    $null = Assert-ExternalDestination $destinationPath $sourcePaths $identity
     New-Item -ItemType Directory -Path $destinationPath -Force -ErrorAction Stop | Out-Null
-    $lock = [IO.File]::Open((Join-Path $destinationPath '.backup.lock'), 'OpenOrCreate', 'ReadWrite', 'None')
+    $lockPath = Join-Path $destinationPath '.backup.lock'
+    Assert-PlainPath $lockPath
+    $lock = [IO.File]::Open($lockPath, 'OpenOrCreate', 'ReadWrite', 'None')
     try {
         $run = Join-Path $destinationPath ('_RELATORIOS\' + [guid]::NewGuid().ToString('N'))
-        New-Item -ItemType Directory -Path $run -Force | Out-Null
+        $null = Assert-ExternalDestination $run $sourcePaths $identity
+        New-Item -ItemType Directory -Path $run -Force -ErrorAction Stop | Out-Null
         $seen = New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
         $errors = 0
         $csv = Join-Path $run 'inventario.csv'
+        # Finish indexing the selected backup folder before copying anything.
+        try { $index = Get-ExistingBackupIndex $destinationPath }
+        catch {
+            $null = Assert-ExternalDestination $run $sourcePaths $identity
+            $_.Exception.Message | Set-Content -LiteralPath (Join-Path $run 'erros.txt') -Encoding UTF8
+            Write-BackupReview -Run $run -Sources $Sources -Mode $Mode -Errors 1
+            throw "Índice do backup incompleto; nenhuma cópia iniciada. Consulte $run"
+        }
         foreach ($source in $Sources) {
-            $root = [IO.Path]::GetFullPath($source.Path).TrimEnd('\','/')
+            $root = [IO.Path]::GetFullPath($source.Path).TrimEnd('\')
             try {
                 Get-BackupFiles $root | ForEach-Object {
                     $file = $_
                     if ($seen.Add($file.FullName)) {
                         $relative = $file.FullName.Substring($root.Length + 1)
                         $target = Join-Path (Join-Path $destinationPath $source.Id) $relative
-                        $status = 'AUDITED'; $hash = ''; $message = ''
+                        $status = 'NEEDS_COPY'; $hash = ''; $message = ''; $actual = ''
                         try {
-                            if ($Mode -eq 'Backup') {
-                                $status = Copy-VerifiedFile $file.FullName $target (Join-Path $run 'robocopy.log')
-                                $hash = Get-BackupHash $target
+                            $null = Assert-ExternalDestination $target $sourcePaths $identity
+                            $hash = Get-BackupHash $file.FullName
+                            $existing = Find-ExistingContent $hash $file.Length $index
+                            if ($existing) {
+                                $actual = $existing
+                                $status = if ($existing -eq $target) { 'SKIP_IDENTICAL' } else { 'REUSED_EXISTING' }
+                            } elseif ($Mode -eq 'Backup') {
+                                $status = Copy-VerifiedFile $file.FullName $target (Join-Path $run 'robocopy.log') $identity
+                                if ((Get-BackupHash $target) -ne $hash) { throw 'A origem mudou desde a comparação; execute novamente.' }
+                                $actual = $target
+                                $key = [string]$file.Length
+                                if (-not $index.ContainsKey($key)) { $index[$key] = New-Object 'Collections.Generic.List[string]' }
+                                $index[$key].Add($target)
                             }
                         } catch { $status = 'ERROR'; $message = $_.Exception.Message; $errors++ }
-                        [pscustomobject]@{Source=$file.FullName; Destination=$target; Bytes=$file.Length;
+                        $null = Assert-ExternalDestination $csv $sourcePaths $identity
+                        [pscustomobject]@{Source=$file.FullName; RelativePath=('.\' + $relative); RootId=$source.Id;
+                            PlannedDestination=$target; Destination=$actual; Bytes=$file.Length;
                             SHA256=$hash; Status=$status; Error=$message} |
-                            Export-Csv -LiteralPath $csv -Append -NoTypeInformation -Encoding UTF8
+                            Export-Csv -LiteralPath $csv -Append -NoTypeInformation -Encoding UTF8 -ErrorAction Stop
                     }
                 }
             } catch {
                 $errors++
-                $_.Exception.Message | Add-Content -LiteralPath (Join-Path $run 'erros.txt')
+                $null = Assert-ExternalDestination $run $sourcePaths $identity
+                $_.Exception.Message | Add-Content -LiteralPath (Join-Path $run 'erros.txt') -ErrorAction Stop
             }
         }
-        [pscustomobject]@{Mode=$Mode; Errors=$errors; Report=$run; FormattingDecision='NOT_ASSESSED'} |
+        $null = Assert-ExternalDestination $run $sourcePaths $identity
+        [pscustomobject]@{Mode=$Mode; Errors=$errors; Report=$run; FormattingDecision='NOT_ASSESSED';
+            DiskId=$identity.DiskId; VolumeId=$identity.VolumeId} |
             ConvertTo-Json | Set-Content -LiteralPath (Join-Path $run 'resumo.json') -Encoding UTF8
         Write-BackupReview -Run $run -Sources $Sources -Mode $Mode -Errors $errors
         Write-Host "Relatório para revisão: $(Join-Path $run 'LEIA-ME.html')"
@@ -120,4 +196,7 @@ function Invoke-BackupPlan {
     } finally { $lock.Dispose() }
 }
 
-Export-ModuleMember -Function Assert-BackupDependencies, Write-BackupReview, Test-PathWithin, Get-BackupFiles, Get-BackupHash, Copy-VerifiedFile, Invoke-BackupPlan
+Export-ModuleMember -Function Assert-BackupDependencies, Write-BackupReview, Test-PathWithin,
+    Get-BackupFiles, Get-BackupHash, Copy-VerifiedFile, Invoke-BackupPlan,
+    Assert-PlainPath, Get-StorageIdentity, Assert-ExternalDestination, Select-BackupDestination,
+    Get-ExistingBackupIndex, Find-ExistingContent
