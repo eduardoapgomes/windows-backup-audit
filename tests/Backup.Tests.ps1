@@ -176,3 +176,65 @@ Describe 'Dependencies and readable reports' {
         Get-Content "$run\LEIA-ME.html" -Raw | Should -Not -Match '<script>'
     }
 }
+
+Describe 'Cloud source policy' {
+    It 'recognizes all documented Cloud Files tags and rejects other tags' {
+        foreach ($variant in 0..15) {
+            Test-CloudReparseTag ([uint32](2415919130 + $variant * 4096)) | Should -BeTrue
+        }
+        foreach ($tag in @(0, 2684354563, 2684354572, 2147483681, 2415919132)) {
+            Test-CloudReparseTag ([uint32]$tag) | Should -BeFalse
+        }
+    }
+    It 'reads native metadata without opening content' {
+        $path = Join-Path $TestDrive 'native.txt'
+        [IO.File]::WriteAllText($path, 'local')
+        Get-ReparseTag $path | Should -Be 0
+        $real = New-Item -ItemType Directory (Join-Path $TestDrive 'native-dir')
+        $link = Join-Path $TestDrive 'native-link'
+        New-Item -ItemType Junction -Path $link -Target $real.FullName | Out-Null
+        Get-ReparseTag $link | Should -Be ([uint32]2684354563)
+        { Assert-PlainPath "$link\child" -AllowCloudSource } | Should -Throw '*redirecionado*'
+    }
+    It 'allows cloud markers only for sources including ancestors' {
+        Mock Test-Path -ModuleName Backup.Core { $true }
+        Mock Get-Item -ModuleName Backup.Core { @{Attributes=[IO.FileAttributes]::ReparsePoint} }
+        Mock Get-ReparseTag -ModuleName Backup.Core { [uint32]2415919130 }
+        { Assert-PlainPath 'C:\Cloud\docs' -AllowCloudSource } | Should -Not -Throw
+        { Assert-PlainPath 'C:\Cloud\docs' } | Should -Throw '*redirecionado*'
+    }
+    It 'fails closed when the reparse tag cannot be read' {
+        Mock Test-Path -ModuleName Backup.Core { $true }
+        Mock Get-Item -ModuleName Backup.Core { @{Attributes=[IO.FileAttributes]::ReparsePoint} }
+        Mock Get-ReparseTag -ModuleName Backup.Core { throw 'metadata unavailable' }
+        { Assert-PlainPath 'C:\Cloud' -AllowCloudSource } | Should -Throw '*metadata*'
+    }
+    It 'rejects offline or recall attributes before hashing content' {
+        Mock Assert-PlainPath -ModuleName Backup.Core {}
+        foreach ($attributes in @(4096,262144,4194304)) {
+            Mock Get-Item -ModuleName Backup.Core { @{Attributes=$attributes} }
+            { Get-BackupHash 'C:\never-read.txt' -Source } | Should -Throw '*Sempre manter*'
+        }
+    }
+    It 'records unavailable cloud content as an error without making a copy' {
+        Mock Assert-ExternalDestination -ModuleName Backup.Core { @{DiskId='test';VolumeId='test';FreeBytes=100GB;Drive='Z:\'} }
+        Mock Assert-SourceFileAvailable -ModuleName Backup.Core { throw 'Sempre manter neste dispositivo' }
+        $source = New-Item -ItemType Directory (Join-Path $TestDrive 'cloud-source')
+        $dest = New-Item -ItemType Directory (Join-Path $TestDrive 'cloud-dest')
+        [IO.File]::WriteAllText("$source\offline.txt", 'placeholder stand-in')
+        { Invoke-BackupPlan @(@{Id='docs';Path=$source.FullName}) $dest.FullName Backup } | Should -Throw '*erro*'
+        Test-Path "$dest\docs\offline.txt" | Should -BeFalse
+        $csv = Get-ChildItem "$dest\_RELATORIOS" -Recurse -Filter inventario.csv
+        (Import-Csv $csv.FullName).Status | Should -Be ERROR
+    }
+    It 'preserves an existing personal configuration during setup' {
+        $config = Join-Path $TestDrive 'personal.json'
+        [IO.File]::WriteAllText($config, 'personal settings')
+        { New-BackupConfiguration $config } | Should -Throw '*preservada*'
+        [IO.File]::ReadAllText($config) | Should -Be 'personal settings'
+    }
+    It 'reports an invalid source before blaming external drives' {
+        Mock Assert-PlainPath -ModuleName Backup.Core { throw 'source junction' }
+        { Select-BackupDestination @('C:\bad-source') } | Should -Throw '*origem*source junction*'
+    }
+}

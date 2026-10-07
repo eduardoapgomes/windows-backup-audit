@@ -1,7 +1,9 @@
 ﻿#Requires -Version 5.1
 Set-StrictMode -Version Latest
 . "$PSScriptRoot\Backup.Review.ps1"
+. "$PSScriptRoot\Backup.Cloud.ps1"
 . "$PSScriptRoot\Backup.Storage.ps1"
+. "$PSScriptRoot\Backup.Setup.ps1"
 
 function Test-PathWithin {
     param([string]$Path, [string]$Root)
@@ -13,15 +15,17 @@ function Test-PathWithin {
 
 function Get-BackupFiles {
     param([string]$Root, [switch]$ExistingBackup)
-    Assert-PlainPath $Root
+    Assert-PlainPath $Root -AllowCloudSource:(-not $ExistingBackup)
     $stack = New-Object 'Collections.Generic.Stack[string]'
     $stack.Push($Root)
     while ($stack.Count) {
-        foreach ($item in Get-ChildItem -LiteralPath $stack.Pop() -Force -ErrorAction Stop) {
+        $directory = $stack.Pop()
+        Assert-PlainPath $directory -AllowCloudSource:(-not $ExistingBackup)
+        foreach ($item in Get-ChildItem -LiteralPath $directory -Force -ErrorAction Stop) {
             if ($ExistingBackup -and ($item.Name -eq '_RELATORIOS' -or $item.Name -eq '.backup.lock' -or
                 $item.Name -like '.stage-*' -or $item.Name -like '.history-*')) { continue }
             if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
-                throw "Reparse point precisa de revisão/materialização: $($item.FullName)"
+                Assert-PlainPath $item.FullName -AllowCloudSource:(-not $ExistingBackup)
             }
             if ($item.PSIsContainer) { $stack.Push($item.FullName) } else { $item }
         }
@@ -29,8 +33,8 @@ function Get-BackupFiles {
 }
 
 function Get-BackupHash {
-    param([string]$Path)
-    Assert-PlainPath $Path
+    param([string]$Path, [switch]$Source)
+    if ($Source) { Assert-SourceFileAvailable $Path } else { Assert-PlainPath $Path }
     $stream = [IO.File]::Open($Path, 'Open', 'Read', 'Read')
     $sha = [Security.Cryptography.SHA256]::Create()
     try { return [BitConverter]::ToString($sha.ComputeHash($stream)).Replace('-','') }
@@ -44,10 +48,11 @@ function Copy-VerifiedFile {
     $logIdentity = Assert-ExternalDestination $Log @($Source) $identity
     $null = $logIdentity
     # A read-only shared handle prevents writers/deletion during copy and verification.
+    Assert-SourceFileAvailable $Source
     $sourceLock = [IO.File]::Open($Source, 'Open', 'Read', 'Read')
     $stage = $null
     try {
-        $before = Get-BackupHash $Source
+        $before = Get-BackupHash $Source -Source
         if (Test-Path -LiteralPath $Destination) {
             if ((Get-BackupHash $Destination) -eq $before) { return 'SKIP_IDENTICAL' }
         }
@@ -63,7 +68,7 @@ function Copy-VerifiedFile {
         & robocopy.exe @arguments | Out-Null
         if ($LASTEXITCODE -ge 8) { throw "Robocopy: $LASTEXITCODE" }
         $temporary = Join-Path $stage (Split-Path -Leaf $Source)
-        if ((Get-BackupHash $temporary) -ne $before -or (Get-BackupHash $Source) -ne $before) {
+        if ((Get-BackupHash $temporary) -ne $before -or (Get-BackupHash $Source -Source) -ne $before) {
             throw 'Conteúdo mudou ou verificação falhou; destino anterior preservado.'
         }
         $null = Assert-ExternalDestination $Destination @($Source) $identity
@@ -121,7 +126,7 @@ function Invoke-BackupPlan {
             $source.Id -match '^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$' -or -not $ids.Add($source.Id)) {
             throw 'Id inválido/reservado ou repetido; use letras e números no início, depois _ ou -.'
         }
-        Assert-PlainPath $source.Path
+        Assert-PlainPath $source.Path -AllowCloudSource
         if (-not (Test-Path -LiteralPath $source.Path -PathType Container)) { throw "Origem ausente: $($source.Path)" }
         if ((Test-PathWithin $destinationPath $source.Path) -or (Test-PathWithin $source.Path $destinationPath)) {
             throw 'Origem e destino precisam ser árvores independentes.'
@@ -158,7 +163,7 @@ function Invoke-BackupPlan {
                         $status = 'NEEDS_COPY'; $hash = ''; $message = ''; $actual = ''
                         try {
                             $null = Assert-ExternalDestination $target $sourcePaths $identity
-                            $hash = Get-BackupHash $file.FullName
+                            $hash = Get-BackupHash $file.FullName -Source
                             $existing = Find-ExistingContent $hash $file.Length $index
                             if ($existing) {
                                 $actual = $existing
@@ -199,4 +204,5 @@ function Invoke-BackupPlan {
 Export-ModuleMember -Function Assert-BackupDependencies, Write-BackupReview, Test-PathWithin,
     Get-BackupFiles, Get-BackupHash, Copy-VerifiedFile, Invoke-BackupPlan,
     Assert-PlainPath, Get-StorageIdentity, Assert-ExternalDestination, Select-BackupDestination,
-    Get-ExistingBackupIndex, Find-ExistingContent
+    Get-ExistingBackupIndex, Find-ExistingContent, New-BackupConfiguration,
+    Get-ReparseTag, Test-CloudReparseTag, Assert-SourceFileAvailable

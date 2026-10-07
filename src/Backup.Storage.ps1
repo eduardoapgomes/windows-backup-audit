@@ -1,5 +1,5 @@
 ﻿function Assert-PlainPath {
-    param([Parameter(Mandatory)][string]$Path)
+    param([Parameter(Mandatory)][string]$Path, [switch]$AllowCloudSource)
     if ($Path -notmatch '^[A-Za-z]:\\' -or $Path.Substring(2).Contains(':')) {
         throw 'Use um caminho local absoluto com letra de unidade; UNC, relativo e ADS não são aceitos.'
     }
@@ -8,7 +8,9 @@
         if (Test-Path -LiteralPath $current -ErrorAction Stop) {
             $item = Get-Item -LiteralPath $current -Force -ErrorAction Stop
             if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
-                throw "Caminho redirecionado (junction/link/mount point): $current"
+                if (-not $AllowCloudSource -or -not (Test-CloudReparseTag (Get-ReparseTag $current))) {
+                    throw "Caminho redirecionado ou reparse não permitido: $current"
+                }
             }
         }
         $parent = [IO.Directory]::GetParent($current)
@@ -18,8 +20,8 @@
 }
 
 function Get-StorageIdentity {
-    param([string]$Path)
-    Assert-PlainPath $Path
+    param([string]$Path, [switch]$Source)
+    Assert-PlainPath $Path -AllowCloudSource:$Source
     $letter = [IO.Path]::GetPathRoot([IO.Path]::GetFullPath($Path)).Substring(0,1)
     $partitions = @(Get-Partition -DriveLetter $letter -ErrorAction Stop)
     if ($partitions.Count -ne 1) { throw 'Não foi possível identificar uma partição única.' }
@@ -49,7 +51,7 @@ function Assert-ExternalDestination {
     if ($ExpectedIdentity -and ($identity.DiskId -ne $ExpectedIdentity.DiskId -or
         $identity.VolumeId -ne $ExpectedIdentity.VolumeId)) { throw 'O disco de destino foi trocado ou desconectado.' }
     foreach ($source in $Sources) {
-        $sourceDisk = Get-StorageIdentity $source
+        $sourceDisk = Get-StorageIdentity $source -Source
         if ($sourceDisk.DiskId -eq $identity.DiskId) { throw 'Origem e destino estão no mesmo disco físico.' }
     }
     return $identity
@@ -60,16 +62,23 @@ function Select-BackupDestination {
     if (-not (Get-Command Out-GridView -ErrorAction SilentlyContinue)) {
         throw 'Interface requer Windows PowerShell Desktop. Use powershell.exe -STA ou um Destination explícito validado.'
     }
+    foreach ($source in $Sources) {
+        try {
+            Assert-PlainPath $source -AllowCloudSource
+            if (-not (Test-Path -LiteralPath $source -PathType Container)) { throw "Pasta não encontrada: $source" }
+        } catch { throw "Revise a origem antes de selecionar o HD: $($_.Exception.Message)" }
+    }
+    $rejections = New-Object 'Collections.Generic.List[string]'
     $candidates = @(foreach ($volume in Get-Volume -ErrorAction Stop) {
         if ($volume.DriveLetter) {
             try {
                 $identity = Assert-ExternalDestination "$($volume.DriveLetter):\" $Sources
                 [pscustomobject]@{Unidade=$identity.Drive; Nome=$identity.Label;
                     LivreGB=[math]::Round($identity.FreeBytes / 1GB,2); Identidade=$identity}
-            } catch { Write-Verbose $_.Exception.Message }
+            } catch { $rejections.Add("$($volume.DriveLetter): $($_.Exception.Message)") }
         }
     })
-    if (-not $candidates.Count) { throw 'Nenhum destino USB/NTFS seguro disponível. Consulte docs/SAFETY.md.' }
+    if (-not $candidates.Count) { throw ("Nenhum destino USB/NTFS seguro disponível.`n" + ($rejections -join "`n") + "`nConsulte docs/SAFETY.md.") }
     $selection = $candidates | Out-GridView -Title 'Selecione o disco USB externo (Cancelar interrompe)' -OutputMode Single
     if ($null -eq $selection) { throw 'Seleção cancelada. Nenhum backup iniciado.' }
     Add-Type -AssemblyName System.Windows.Forms

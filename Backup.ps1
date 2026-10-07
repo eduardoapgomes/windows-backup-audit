@@ -3,7 +3,9 @@
 param(
     [string]$Config,
     [ValidateSet('Audit','Backup')][string]$Mode = 'Audit',
-    [switch]$SelectDestination
+    [switch]$SelectDestination,
+    [switch]$Setup,
+    [switch]$OpenReport
 )
 cd $PSScriptRoot
 $ErrorActionPreference = 'Stop'
@@ -14,8 +16,9 @@ try {
     } elseif (-not [IO.Path]::IsPathRooted($Config)) {
         $Config = Join-Path -Path $PSScriptRoot -ChildPath $Config
     }
+    if ($Setup) { New-BackupConfiguration -Path $Config; exit 0 }
     if (-not (Test-Path -LiteralPath $Config -PathType Leaf)) {
-        throw "Configuração não encontrada: $Config. Copie backup.example.json para backup.local.json e ajuste suas pastas."
+        throw "Configuração não encontrada: $Config. Execute Iniciar.cmd e escolha Configurar, ou use -Setup para selecionar suas pastas."
     }
     Assert-BackupDependencies $Mode
     $plan = Get-Content -LiteralPath $Config -Raw | ConvertFrom-Json
@@ -24,5 +27,9 @@ try {
     if ($SelectDestination -or [string]::IsNullOrWhiteSpace($destination)) {
         $destination = Select-BackupDestination @($plan.Sources | ForEach-Object { $_.Path })
     }
-    Invoke-BackupPlan -Sources $plan.Sources -Destination $destination -Mode $Mode
+    $report = Invoke-BackupPlan -Sources $plan.Sources -Destination $destination -Mode $Mode
+    if ($OpenReport -and $report -and (Test-Path -LiteralPath (Join-Path $report 'LEIA-ME.html'))) {
+        Start-Process -FilePath (Join-Path $report 'LEIA-ME.html')
+    }
+    $report
 } catch { Write-Error $_ -ErrorAction Continue; exit 2 }

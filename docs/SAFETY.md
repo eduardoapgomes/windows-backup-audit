@@ -35,3 +35,18 @@ Fontes primárias consultadas:
 - https://learn.microsoft.com/en-us/powershell/module/storage/get-partition
 - https://learn.microsoft.com/en-us/powershell/module/storage/get-volume
 - https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/robocopy
+
+
+## Cloud Files / OneDrive
+
+O atributo ReparsePoint sozinho não indica um link. Nas origens, a lista permitida inclui exclusivamente IO_REPARSE_TAG_CLOUD e CLOUD_1 a CLOUD_F. A tag é consultada via CreateFileW com OPEN_REPARSE_POINT/ BACKUP_SEMANTICS e acesso zero, seguido de GetFileInformationByHandleEx(FileAttributeTagInfo). Falha de leitura e tags desconhecidas bloqueiam o caminho. Todos os ancestrais são verificados. O destino não permite nenhuma dessas exceções.
+
+Arquivos com Offline, RecallOnOpen ou RecallOnDataAccess são rejeitados antes de abrir conteúdo, com instrução para disponibilizar localmente. Diretórios Cloud Files podem ser enumerados para encontrar seus arquivos; essa enumeração pode consultar metadados do provedor. O programa não muda atributos nem solicita hidratação explícita. Essas verificações não impedem um provedor concorrente de mudar o estado entre checagem e abertura. Fixe os arquivos localmente e aguarde sincronização antes de executar. Erros são registrados e a execução termina sem confirmar cobertura completa.
+
+Testes sintéticos cobrem as 16 tags permitidas, tags desconhecidas, atributos offline/recall e relatório de falha. Testes Windows reais cobrem a API de metadados e junctions. O runner não tem conta OneDrive nem HD USB: integração real com nuvem, hardware e seleção gráfica requer validação manual.
+
+Referências da implementação:
+- https://learn.microsoft.com/en-us/windows/win32/fileio/reparse-point-tags
+- https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-fscc/c8e77b37-3909-4fe6-a4ea-2b9d423b1ee4
+- https://learn.microsoft.com/en-us/windows/win32/fileio/file-attribute-constants
+- https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew

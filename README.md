@@ -1,5 +1,49 @@
 # Windows Backup
 
+## Comece pelo menu (Windows)
+
+Se você já clonou o projeto, atualize sem recriar sua configuração:
+
+```powershell
+cd "$env:USERPROFILE\Projetos\windows-backup-audit"
+git pull --ff-only
+if ($LASTEXITCODE -ne 0) { throw "A atualização falhou; confira a mensagem acima." }
+.\Iniciar.cmd
+```
+
+Também pode dar dois cliques em **Iniciar.cmd**. Escolha **1** apenas no primeiro uso para selecionar as pastas de origem em janelas. Uma configuração existente é preservada. Escolha **2** para auditar e abrir o relatório HTML; **3** para copiar e verificar; **4** para ler a documentação; **5** para editar sua configuração. Confira todas as pastas desejadas: a seleção não inclui automaticamente o computador inteiro.
+
+Na seleção de destino, escolha o HD USB e depois a pasta onde estão os backups manuais/parciais. Para começar um backup novo, escolha a raiz do HD: o programa cria sua pasta própria. A auditoria grava relatórios no HD, mas não copia seus arquivos. Arquivos iguais são comparados por SHA-256 e reutilizados dentro da pasta selecionada.
+
+### OneDrive
+
+Pastas e arquivos com marcadores Cloud Files são aceitos **somente como origem**. Junctions, links e outros tipos de redirecionamento continuam bloqueados, mesmo dentro de uma pasta chamada OneDrive. O destino continua exigindo USB/NTFS, fora do disco de origem e sem reparse points.
+
+Se aparecer **“Arquivo em nuvem não disponível localmente”**, no Explorador clique com o botão direito na pasta do OneDrive, escolha **Sempre manter neste dispositivo** e aguarde a conclusão do download. Isso usa espaço no disco de origem. Depois execute a auditoria novamente. O programa verifica atributos antes de ler e registra arquivos indisponíveis como erro; não baixa conteúdo deliberadamente nem considera esses arquivos protegidos pelo backup. Um provedor concorrente pode alterar o estado entre a verificação e a leitura; veja `docs/SAFETY.md`.
+
+### Comandos separados (sem menu)
+
+Configuração inicial por janelas, somente se ainda não tiver `backup.local.json`:
+
+```powershell
+powershell.exe -NoProfile -STA -File .\Backup.ps1 -Setup
+```
+
+**Auditoria — comparar e gerar relatório:**
+
+```powershell
+powershell.exe -NoProfile -STA -File .\Backup.ps1 -Mode Audit -SelectDestination -OpenReport
+```
+
+**Backup — copiar e verificar, após revisar a auditoria:**
+
+```powershell
+powershell.exe -NoProfile -STA -File .\Backup.ps1 -Mode Backup -SelectDestination -OpenReport
+```
+
+O relatório abre automaticamente quando a execução termina sem erros. Se houver erros, a mensagem indica a pasta `_RELATORIOS` no HD; abra seu `LEIA-ME.html`. Não reinstale nem formate o Windows com pendências. Não é necessário instalar Pandoc. O menu usa Windows PowerShell Desktop, Windows Forms e Out-GridView; a leitura de tags usa APIs nativas do Windows por `Add-Type` (ambientes com linguagem restrita podem bloquear, sem liberar o destino).
+
+
 Projeto pré-formatação baseado na pesquisa **Backup Windows com PowerShell: inventário profundo, deduplicação, segurança e verificação pré-formatação**, de 07/10/2026.
 
 ## Guia para quem está começando
