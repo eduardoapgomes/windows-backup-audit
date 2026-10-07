@@ -21,6 +21,7 @@ function Write-BackupReview {
     $count = 0; $bytes = [long]0; $statuses = @{}
     if (Test-Path -LiteralPath $csv) {
         Import-Csv -LiteralPath $csv | ForEach-Object {
+            Show-BackupProgress -Phase 'Resumindo inventário' -Path $csv
             $count++; $bytes += [long]$_.Bytes
             if (-not $statuses.ContainsKey($_.Status)) { $statuses[$_.Status] = 0 }
             $statuses[$_.Status]++

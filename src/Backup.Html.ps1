@@ -11,9 +11,11 @@ function Format-BackupSize {
 }
 function Get-BackupCategory {
     param([string]$Path)
-    $name=[IO.Path]::GetFileName($Path).ToLowerInvariant()
+    $name=($Path -split '[\\/]')[-1].ToLowerInvariant()
+    $dot=$name.LastIndexOf('.')
+    $extension=if ($dot -ge 0) { $name.Substring($dot) } else { '' }
     if ($name -in @('environment.yml','environment.yaml','requirements.txt','.condarc','pyproject.toml','pipfile','pipfile.lock','poetry.lock')) { return 'Configurações de ambientes Python/Conda' }
-    switch ([IO.Path]::GetExtension($Path).ToLowerInvariant()) {
+    switch ($extension) {
         '.ipynb' { return 'Notebooks Jupyter' }
         '.py' { return 'Scripts Python' }
         {$_ -in @('.pdf','.doc','.docx','.odt','.txt','.md','.tex')} { return 'Documentos e textos' }
@@ -30,6 +32,7 @@ function Write-BackupHtml {
     $csv=Join-Path $Run 'inventario.csv'
     if (Test-Path -LiteralPath $csv) {
         Import-Csv -LiteralPath $csv | ForEach-Object {
+            Show-BackupProgress -Phase 'Gerando relatório HTML' -Path $csv
             $row=$_; $size=[long]$row.Bytes; $total+=$size; $count++
             $category=Get-BackupCategory $row.Source
             if (-not $categories.ContainsKey($category)) { $categories[$category]=@{Files=0;Bytes=[long]0} }
