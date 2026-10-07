@@ -1,0 +1,112 @@
+﻿BeforeAll { Import-Module "$PSScriptRoot/../src/Backup.Core.psm1" -Force }
+Describe 'Automatic discovery policy' {
+    BeforeEach {
+        Mock Get-PersonalFolderCandidates -ModuleName Backup.Core {
+            @([pscustomobject]@{Path='C:\People\User';Kind='Profile'},
+              [pscustomobject]@{Path='C:\People\User\Documents';Kind='Documents'},
+              [pscustomobject]@{Path='F:\Redirected';Kind='Redirected'})
+        }
+        Mock Get-Volume -ModuleName Backup.Core { @(@{DriveLetter='C'},@{DriveLetter='D'},@{DriveLetter='E'}) }
+        Mock Get-StorageIdentity -ModuleName Backup.Core {
+            @{BusType=$(if ($Path -like 'D:*') {'USB'} else {'NVMe'});IsBoot=($Path -like 'C:*');IsSystem=($Path -like 'C:*');IsOffline=$false}
+        }
+        Mock Assert-PlainPath -ModuleName Backup.Core {}
+        Mock Test-Path -ModuleName Backup.Core { $true }
+    }
+    It 'scans system and data volumes including Users, while excluding software paths and USB' {
+        $plan=Get-AutomaticBackupPlan
+        @($plan.Sources).Count | Should -Be 3
+        $plan.Sources.Path | Should -Contain 'E:\'
+        $plan.Sources.Path | Should -Contain 'F:\Redirected'
+        $plan.Sources.Path | Should -Contain 'C:\'
+        $plan.Sources.Path | Should -Not -Contain 'D:\'
+        $plan.Sources.Path | Should -Not -Contain 'C:\People\User\Documents'
+        @($plan.Discovery | Where-Object Status -eq COVERED).Count | Should -Be 2
+        $plan.ExcludedPaths | Should -Contain 'E:\System Volume Information'
+        $plan.ExcludedPaths | Should -Contain 'C:\Windows'
+        $plan.ExcludedPaths | Should -Not -Contain 'C:\Users'
+        $plan.ExcludedPaths | Should -Not -Contain 'C:\ProgramData'
+    }
+    It 'keeps source identifiers stable across discovery order changes' {
+        $first=Get-AutomaticBackupPlan
+        $second=Get-AutomaticBackupPlan
+        ($first.Sources.Id -join ',') | Should -Be ($second.Sources.Id -join ',')
+    }
+    It 'records missing roots instead of silently claiming complete discovery' {
+        Mock Test-Path -ModuleName Backup.Core { $false } -ParameterFilter { $LiteralPath -eq 'F:\Redirected' }
+        $plan=Get-AutomaticBackupPlan
+        @($plan.Discovery | Where-Object Status -eq ERROR).Count | Should -Be 1
+        $plan.Sources.Path | Should -Not -Contain 'F:\Redirected'
+    }
+    It 'records a disk metadata failure and does not guess its source eligibility' {
+        Mock Get-StorageIdentity -ModuleName Backup.Core { throw 'unknown disk' } -ParameterFilter { $Path -like 'E:*' }
+        $plan=Get-AutomaticBackupPlan
+        $plan.Sources.Path | Should -Not -Contain 'E:\'
+        @($plan.Discovery | Where-Object Status -eq ERROR).Count | Should -Be 1
+    }
+}
+Describe 'Resilient enumeration and chunked progress' {
+    It 'continues past a rejected junction and honors explicit exclusions' {
+        $root=New-Item -ItemType Directory (Join-Path $TestDrive 'tree')
+        $outside=New-Item -ItemType Directory (Join-Path $TestDrive 'outside')
+        $excluded=New-Item -ItemType Directory (Join-Path $root 'excluded')
+        [IO.File]::WriteAllText("$root\keep.txt",'keep')
+        [IO.File]::WriteAllText("$excluded\skip.txt",'skip')
+        [IO.File]::WriteAllText("$outside\not-followed.txt",'external')
+        New-Item -ItemType Junction -Path "$root\link" -Target $outside.FullName | Out-Null
+        $issues=New-Object 'Collections.Generic.List[object]'
+        $files=@(Get-BackupFiles $root.FullName -ExcludedPaths @($excluded.FullName) -Issues $issues)
+        $files.Count | Should -Be 1
+        $files[0].Name | Should -Be 'keep.txt'
+        $issues.Count | Should -Be 1
+        $issues[0].Path | Should -Be "$root\link"
+        { Get-BackupFiles $root.FullName -ExistingBackup } | Should -Throw
+    }
+    It 'matches standard SHA256 for empty and multi-chunk files and emits progress without contaminating output' {
+        Mock Show-BackupProgress -ModuleName Backup.Core {}
+        $path=Join-Path $TestDrive 'large.bin'
+        [IO.File]::WriteAllBytes($path,(New-Object byte[] (9MB)))
+        Get-BackupHash $path | Should -Be (Get-FileHash $path -Algorithm SHA256).Hash
+        Should -Invoke Show-BackupProgress -ModuleName Backup.Core -ParameterFilter { $ReadBytes -eq 4MB -and $TotalBytes -eq 9MB } -Times 1 -Exactly
+        [IO.File]::WriteAllBytes($path,(New-Object byte[] 0))
+        Get-BackupHash $path | Should -Be (Get-FileHash $path -Algorithm SHA256).Hash
+    }
+    It 'writes progress only to host/progress streams' {
+        Mock Write-Progress -ModuleName Backup.Core {}
+        Mock Write-Host -ModuleName Backup.Core {}
+        $result=@(Start-BackupProgress Audit; Show-BackupProgress -Phase 'Hash' -Path 'C:\file' -ReadBytes 1 -TotalBytes 2; Stop-BackupProgress)
+        $result.Count | Should -Be 0
+        Should -Invoke Write-Progress -ModuleName Backup.Core -Times 2 -Exactly
+    }
+    It 'saves enumeration failures and still audits accessible sibling files' {
+        Mock Assert-ExternalDestination -ModuleName Backup.Core { @{DiskId='test';VolumeId='test';FreeBytes=100GB;Drive='Z:\'} }
+        $source=New-Item -ItemType Directory (Join-Path $TestDrive 'partial-source')
+        $dest=New-Item -ItemType Directory (Join-Path $TestDrive 'partial-dest')
+        $outside=New-Item -ItemType Directory (Join-Path $TestDrive 'partial-outside')
+        New-Item -ItemType Junction -Path "$source\link" -Target $outside.FullName | Out-Null
+        [IO.File]::WriteAllText("$source\good.txt",'data')
+        { Invoke-BackupPlan @(@{Id='docs';Path=$source.FullName}) $dest.FullName Audit } | Should -Throw '*erro*'
+        $run=(Get-ChildItem "$dest\_RELATORIOS" -Directory)[0].FullName
+        (Import-Csv "$run\inventario.csv").Status | Should -Be NEEDS_COPY
+        @(Import-Csv "$run\falhas-enumeracao.csv").Count | Should -Be 1
+        (Get-Content "$run\LEIA-ME.html" -Raw) | Should -Match 'INCOMPLETO'
+    }
+}
+Describe 'Readable HTML report' {
+    It 'renders real tables, coverage, large files and escaped paths without a raw Markdown block' {
+        $run=New-Item -ItemType Directory (Join-Path $TestDrive 'html')
+        @([pscustomobject]@{RootId='docs';Source='C:\Docs\<script>.txt';Bytes=2048;Status='NEEDS_COPY';Error=''},
+          [pscustomobject]@{RootId='docs';Source='C:\Docs\cloud.txt';Bytes=1024;Status='ERROR';Error='Offline <img>'}) |
+            Export-Csv "$run\inventario.csv" -NoTypeInformation -Encoding UTF8
+        [pscustomobject]@{Path='C:\AppData';Status='EXCLUDED';Reason='App data'} |
+            Export-Csv "$run\cobertura.csv" -NoTypeInformation -Encoding UTF8
+        Write-BackupReview $run.FullName @(@{Id='docs';Path='C:\Docs'}) Audit 1
+        $html=Get-Content "$run\LEIA-ME.html" -Raw
+        $html | Should -Match '<table>'
+        $html | Should -Match '<td>2</td>'
+        $html | Should -Match 'Maiores arquivos'
+        $html | Should -Match 'C:\\AppData'
+        $html | Should -Match '&lt;script&gt;'
+        $html | Should -Not -Match '<script>|<pre>|\*\*Audit\*\*'
+    }
+}

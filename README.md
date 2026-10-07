@@ -11,9 +11,45 @@ if ($LASTEXITCODE -ne 0) { throw "A atualização falhou; confira a mensagem aci
 .\Iniciar.cmd
 ```
 
-Também pode dar dois cliques em **Iniciar.cmd**. Escolha **1** apenas no primeiro uso para selecionar as pastas de origem em janelas. Uma configuração existente é preservada. Escolha **2** para auditar e abrir o relatório HTML; **3** para copiar e verificar; **4** para ler a documentação; **5** para editar sua configuração. Confira todas as pastas desejadas: a seleção não inclui automaticamente o computador inteiro.
+Também pode dar dois cliques em **Iniciar.cmd**. Escolha **1 — Auditoria automática** para descobrir dados sem editar JSON. Depois de revisar o relatório, use **2 — Backup automático**. As opções **3, 4 e 5** configuram e executam o modo manual; **6** abre a documentação e **7** edita a configuração manual. Sua configuração existente é preservada; o modo automático não a utiliza nem a sobrescreve.
 
 Na seleção de destino, escolha o HD USB e depois a pasta onde estão os backups manuais/parciais. Para começar um backup novo, escolha a raiz do HD: o programa cria sua pasta própria. A auditoria grava relatórios no HD, mas não copia seus arquivos. Arquivos iguais são comparados por SHA-256 e reutilizados dentro da pasta selecionada.
+
+### O que a varredura automática cobre
+
+O modo automático varre os volumes internos com letra, **inclusive C:\ e Users**, procurando dados fora e dentro do perfil. Reconhece pastas pessoais redirecionadas e OneDrive. Raízes sobrepostas são consolidadas. A pasta de configuração manual não limita essa varredura.
+
+Os tipos internos habilitados são SATA, ATA, NVMe, SAS, SCSI e RAID; volumes offline e mídias USB não são origens automáticas. O HD USB continua sendo selecionado como destino e nunca pode estar no mesmo disco físico das origens.
+
+Exclusões explícitas na raiz de cada volume: Windows, Program Files, Program Files (x86), Boot, EFI, Recovery, Config.Msi, $RECYCLE.BIN, System Volume Information e arquivos de paginação/hibernação/boot. Os principais arquivos NTUSER do perfil atual também são excluídos. **Users, AppData e ProgramData não são descartados em bloco.** Perfis protegidos podem gerar erros de acesso, que são registrados sem interromper as demais pastas. Não alteramos permissões.
+
+**Anaconda:** .conda, .jupyter, .ipython, notebooks, scripts e pastas próprias dentro de Users permanecem na varredura. Instalações Anaconda/Miniconda dentro do perfil também permanecem, porque podem conter trabalhos e configurações misturados aos ambientes; isso pode aumentar o volume. Instalações dentro de Program Files seguem a exclusão de software: se você salvou trabalhos ali, inclua essa pasta em uma execução manual. A cópia de um ambiente não garante que ele será executável após reinstalar; preserve também environment.yml/requirements.txt ou exporte o ambiente pelo próprio Conda.
+
+A descoberta não cobre rede nem volumes sem letra e não produz uma imagem do sistema. Revise a lista de exclusões: arquivos pessoais armazenados dentro de diretórios excluídos exigem uma execução manual específica.
+
+O relatório registra raízes incluídas, exclusões e falhas de descoberta em **cobertura.csv**, o plano em **plano.json** e falhas de enumeração em **falhas-enumeracao.csv**. Um link ou pasta inacessível não impede examinar as demais pastas: a falha fica registrada e a execução termina como incompleta. Não alteramos permissões e não seguimos junctions.
+
+### Progresso visível e relatório
+
+O console informa descoberta, enumeração, indexação, cálculo SHA-256, arquivo atual, tempo decorrido e quantidade de leituras concluídas. Arquivos grandes são lidos em blocos com progresso de bytes; Robocopy mostra sua saída durante a cópia. A porcentagem se refere ao arquivo atual, não a uma estimativa do total ainda desconhecido. Leituras incluem verificações e revalidações, portanto podem superar o número de arquivos únicos. Em chamadas de sistema bloqueadas pelo disco/provedor, a atualização pode parar até o Windows responder.
+
+O **ANDAMENTO.html** abre no início e atualiza a cada 10 segundos. Seus dados são gravados aproximadamente a cada 5 segundos enquanto a execução avança, inclusive durante o hash de arquivos grandes. O inventário CSV é incremental. Ao concluir, a página encaminha ao relatório final, inclusive quando há erros. Verifique o horário da última atualização: uma interrupção não vira sucesso.
+
+O **LEIA-ME.html** agora tem tabelas reais, totais, maiores arquivos, pendências e cobertura. Não depende de Pandoc. Zero erros só significa que não houve falha registrada dentro do escopo; não prova cobertura de todo o computador.
+
+**Auditoria automática:**
+
+```powershell
+powershell.exe -NoProfile -STA -File .\Backup.ps1 -Mode Audit -AutoDiscover -SelectDestination -OpenReport
+```
+
+**Backup automático, após revisar a auditoria:**
+
+```powershell
+powershell.exe -NoProfile -STA -File .\Backup.ps1 -Mode Backup -AutoDiscover -SelectDestination -OpenReport
+```
+
+O backup redescobre o escopo no momento da execução. Confira seu novo plano/relatório, pois pastas e volumes podem ter mudado desde a auditoria. Escolha a mesma pasta de destino para reutilizar as cópias existentes.
 
 ### OneDrive
 
@@ -41,7 +77,7 @@ powershell.exe -NoProfile -STA -File .\Backup.ps1 -Mode Audit -SelectDestination
 powershell.exe -NoProfile -STA -File .\Backup.ps1 -Mode Backup -SelectDestination -OpenReport
 ```
 
-O relatório abre automaticamente quando a execução termina sem erros. Se houver erros, a mensagem indica a pasta `_RELATORIOS` no HD; abra seu `LEIA-ME.html`. Não reinstale nem formate o Windows com pendências. Não é necessário instalar Pandoc. O menu usa Windows PowerShell Desktop, Windows Forms e Out-GridView; a leitura de tags usa APIs nativas do Windows por `Add-Type` (ambientes com linguagem restrita podem bloquear, sem liberar o destino).
+A página de acompanhamento abre no início; quando a execução termina, encaminha ao relatório final. Se houver erros, a mensagem indica a pasta `_RELATORIOS` no HD; abra seu `LEIA-ME.html`. Não reinstale nem formate o Windows com pendências. Não é necessário instalar Pandoc. O menu usa Windows PowerShell Desktop, Windows Forms e Out-GridView; a leitura de tags usa APIs nativas do Windows por `Add-Type` (ambientes com linguagem restrita podem bloquear, sem liberar o destino).
 
 
 Projeto pré-formatação baseado na pesquisa **Backup Windows com PowerShell: inventário profundo, deduplicação, segurança e verificação pré-formatação**, de 07/10/2026.

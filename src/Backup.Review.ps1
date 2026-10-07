@@ -45,6 +45,14 @@ function Write-BackupReview {
         $lines.Add('| ' + (ConvertTo-ReviewText $source.Id) + ' | ' + (ConvertTo-ReviewText $source.Path) + ' |')
     }
     $lines.Add('')
+    $lines.Add('## Cobertura da descoberta')
+    $coveragePath = Join-Path $Run 'cobertura.csv'
+    if (Test-Path -LiteralPath $coveragePath) {
+        foreach ($entry in (Import-Csv -LiteralPath $coveragePath)) {
+            $lines.Add('- ' + (ConvertTo-ReviewText $entry.Status) + ': ' + (ConvertTo-ReviewText $entry.Path) + ' — ' + (ConvertTo-ReviewText $entry.Reason))
+        }
+    }
+    $lines.Add('Consulte falhas-enumeracao.csv para pastas/links inacessíveis. Exclusões não são dados protegidos pelo backup.')
     $lines.Add('## Resultados por status')
     $lines.Add('O índice cobre somente a pasta de backup escolhida. Duplicatas manuais existentes não são apagadas. Falhas na leitura interrompem a confirmação de cobertura.')
     foreach ($status in ($statuses.Keys | Sort-Object)) { $lines.Add("- ${status}: $($statuses[$status])") }
@@ -70,8 +78,5 @@ function Write-BackupReview {
     }
     $markdown = $lines -join "`r`n"
     $markdown | Set-Content -LiteralPath (Join-Path $Run 'LEIA-ME.md') -Encoding UTF8
-    # Standalone HTML needs neither Pandoc nor a Markdown viewer.
-    $body = [Net.WebUtility]::HtmlEncode($markdown)
-    $html = '<!doctype html><html lang="pt-BR"><meta charset="utf-8"><title>Revisão do backup</title><style>body{max-width:1000px;margin:32px auto;padding:0 20px;font:16px/1.6 system-ui}pre{white-space:pre-wrap;overflow-wrap:anywhere}</style><h1>Relatório de revisão</h1><p>Abra inventario.csv nesta mesma pasta para a lista completa de arquivos.</p><pre>' + $body + '</pre></html>'
-    $html | Set-Content -LiteralPath (Join-Path $Run 'LEIA-ME.html') -Encoding UTF8
+    Write-BackupHtml -Run $Run -Sources $Sources -Mode $Mode -Errors $Errors
 }

@@ -4,25 +4,35 @@ cd /d "%~dp0"
 :menu
 cls
 echo WINDOWS BACKUP - escolha uma opcao
- echo 1. Configurar pastas de origem (primeiro uso)
- echo 2. Auditar - comparar arquivos e gerar relatorio
- echo 3. Fazer backup - copiar e verificar arquivos
- echo 4. Abrir documentacao
- echo 5. Editar configuracao existente
+ echo 1. AUDITORIA AUTOMATICA - descobrir dados e comparar
+ echo 2. BACKUP AUTOMATICO - descobrir, copiar e verificar
+ echo 3. Configurar pastas manualmente (primeiro uso manual)
+ echo 4. Auditoria das pastas da configuracao manual
+ echo 5. Backup das pastas da configuracao manual
+ echo 6. Abrir documentacao
+ echo 7. Editar configuracao manual existente
  echo 0. Sair
-choice /c 123450 /n /m "Opcao: "
-if errorlevel 6 exit /b 0
-if errorlevel 5 goto editar
-if errorlevel 4 goto docs
-if errorlevel 3 goto backup
-if errorlevel 2 goto audit
-powershell.exe -NoProfile -STA -File "%~dp0Backup.ps1" -Setup
-goto resultado
-:audit
-powershell.exe -NoProfile -STA -File "%~dp0Backup.ps1" -Mode Audit -SelectDestination -OpenReport
+choice /c 12345670 /n /m "Opcao: "
+if errorlevel 8 exit /b 0
+if errorlevel 7 goto editar
+if errorlevel 6 goto docs
+if errorlevel 5 goto manualbackup
+if errorlevel 4 goto manualaudit
+if errorlevel 3 goto setup
+if errorlevel 2 goto backup
+powershell.exe -NoProfile -STA -File "%~dp0Backup.ps1" -Mode Audit -AutoDiscover -SelectDestination -OpenReport
 goto resultado
 :backup
-echo Revise a auditoria antes de copiar. Selecione a mesma pasta do backup parcial.
+echo Use a mesma pasta de destino da auditoria automatica revisada.
+powershell.exe -NoProfile -STA -File "%~dp0Backup.ps1" -Mode Backup -AutoDiscover -SelectDestination -OpenReport
+goto resultado
+:setup
+powershell.exe -NoProfile -STA -File "%~dp0Backup.ps1" -Setup
+goto resultado
+:manualaudit
+powershell.exe -NoProfile -STA -File "%~dp0Backup.ps1" -Mode Audit -SelectDestination -OpenReport
+goto resultado
+:manualbackup
 powershell.exe -NoProfile -STA -File "%~dp0Backup.ps1" -Mode Backup -SelectDestination -OpenReport
 goto resultado
 :docs
@@ -33,10 +43,10 @@ if not exist "%~dp0backup.local.json" goto ausente
 notepad.exe "%~dp0backup.local.json"
 goto menu
 :ausente
-echo Use a opcao 1 para criar sua configuracao.
+echo Use a opcao 3 para criar sua configuracao manual.
 pause
 goto menu
 :resultado
-if errorlevel 1 (echo A operacao nao foi concluida. Leia a mensagem acima.) else (echo Operacao concluida.)
+if errorlevel 1 (echo A operacao nao foi concluida. Leia a mensagem acima e o relatorio indicado.) else (echo Operacao concluida.)
 pause
 goto menu

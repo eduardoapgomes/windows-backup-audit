@@ -10,15 +10,25 @@ Describe 'CLI configuration in a fresh Windows PowerShell process' {
         @'
 function Assert-BackupDependencies { param($Mode) }
 function New-BackupConfiguration { param($Path) Write-Output ('SETUP:' + $Path) }
+function Get-AutomaticBackupPlan { [pscustomobject]@{Destination='';Sources=@(@{Id='AUTO';Path='C:\Personal'});Discovery=@();ExcludedPaths=@()} }
 function Select-BackupDestination { param($Sources) 'E:\Chosen' }
 function Invoke-BackupPlan {
-    param($Sources, $Destination, $Mode)
+    param($Sources, $Destination, $Mode, $Discovery, $ExcludedPaths, $Scope, [switch]$OpenReport)
     Write-Output ("PLAN:" + $Sources[0].Id + ":" + $Mode + ":" + $Destination)
 }
 Export-ModuleMember -Function *
 '@ | Set-Content -LiteralPath (Join-Path $fixture 'src\Backup.Core.psm1') -Encoding UTF8
         '{"Destination":"","Sources":[{"Id":"DEFAULT","Path":"C:\\Data"}]}' |
             Set-Content -LiteralPath (Join-Path $fixture 'backup.local.json') -Encoding UTF8
+    }
+    It 'discovers automatically without a config and ignores a manual project-only config' {
+        $output = & powershell.exe -NoProfile -STA -File "$fixture\Backup.ps1" -AutoDiscover -Mode Audit
+        $LASTEXITCODE | Should -Be 0
+        ($output -join '') | Should -Be 'PLAN:AUTO:Audit:E:\Chosen'
+        Remove-Item -LiteralPath "$fixture\backup.local.json"
+        $output = & powershell.exe -NoProfile -STA -File "$fixture\Backup.ps1" -AutoDiscover -Mode Audit
+        $LASTEXITCODE | Should -Be 0
+        ($output -join '') | Should -Be 'PLAN:AUTO:Audit:E:\Chosen'
     }
     It 'routes setup to the script-local configuration without starting a backup' {
         $output = & powershell.exe -NoProfile -STA -File "$fixture\Backup.ps1" -Setup
