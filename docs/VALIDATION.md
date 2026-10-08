@@ -1,11 +1,15 @@
 # Validação
 
-Em 08/10/2026, **56 testes Pester passaram, 0 falhas, 0 ignorados**, em Windows Server 2025 com Windows PowerShell 5.1 e Robocopy real. Também passaram **17 testes Python**, incluindo análise hierárquica, catálogo e interação real com Chrome headless no Windows (73 testes ao todo).
+Em 08/10/2026, **64 testes Pester passaram, 0 falhas, 0 ignorados**, em Windows Server 2025 com Windows PowerShell 5.1 e Robocopy real. Também passaram **24 testes Python**, incluindo análise hierárquica, catálogo e interação real com Chrome headless no Windows (88 testes ao todo).
 
-- Commit de código testado: a1d79733cfd98e01eac6186f8bdd3ae546783fdc
-- Execução: https://github.com/eduardoapgomes/windows-backup-audit/actions/runs/37793440018
+- Commit de código testado: a2aa8f1836cf7cd89a0294d4a363f84fede9f2de
+- Execução: https://github.com/eduardoapgomes/windows-backup-audit/actions/runs/37818723114
 
 ## Cobertura executada
+
+- Índice sob demanda por tamanho: conteúdo sem tamanho correspondente nunca aberto, arquivo pequeno único copiado/verificado e candidato alterado rehashado após resolução do índice.
+- Manifestos Merkle: delimitação não ambígua, subárvore igual comparada na raiz, mudança de conteúdo com tamanho/timestamp preservados, hash desconhecido, escopo diferente e checksum anterior corrompido.
+- MinHash/LSH: assinaturas determinísticas, ordem indiferente, nomes iguais com conteúdos diferentes somente para revisão, Jaccard conferido, buckets saturados, limites explícitos e reutilização de assinatura apenas com fingerprint de nomes igual.
 
 - Catálogo contextual: limites de candidatos, preservação de projetos, pacotes instalados não classificados como projetos independentes, ambiguidade, evidência fraca de nomes pessoais, hashes ausentes/erros, contagens de cobertura e entradas CSV parciais.
 - Saídas somente leitura: inventário inalterado, caminhos inexistentes nunca abertos, recusa de saída já existente, nomes HTML hostis e fórmulas CSV escapados.

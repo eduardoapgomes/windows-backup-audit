@@ -72,3 +72,7 @@ NCD não é atalho para igualdade nem substitui uma verificação de integridade
 - Cilibrasi e Vitányi, Clustering by compression: https://arxiv.org/abs/cs/0312044
 - Large Language Models and Normalized Compression Distance: Better Compression Yet Worse Accuracy (2026): https://doi.org/10.3233/FAIA251322
 - Estruturas de árvore e identificação por conteúdo em sistemas de backup: https://restic.readthedocs.io/en/v0.5.0/Design/
+
+## Atualização: Merkle e MinHash
+
+O experimento acima mantém seu fingerprint simples. O mecanismo de backup agora grava manifestos Merkle separados e o painel contextual usa MinHash/LSH para selecionar pares. Consulte [deduplicação e comparação incremental](INCREMENTAL.md) para distinguir os recursos implementados dos limites de detecção de mudanças.

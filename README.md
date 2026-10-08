@@ -243,3 +243,12 @@ Após atualizar, abra `Iniciar.cmd` e escolha **8**. Selecione o `inventario.csv
 O painel tem navegação pelas pastas, barras de tamanho e cobertura, busca paginada com o caminho da cópia e um diagrama de relações candidatas. Arquivos diretamente em Downloads/Área de Trabalho são relacionados a projetos por nomes e hashes já observados. Casos ambíguos e sem evidência ficam explícitos. **Nenhum agrupamento muda caminhos, dispensa cópia ou apaga arquivos.** A organização é um catálogo adicional; a restauração continua baseada no inventário.
 
 O painel é salvo em uma pasta temporária local exclusiva, cujo caminho aparece no terminal. Para mantê-lo, copie a pasta inteira para um local de sua escolha. Ele contém caminhos pessoais: não publique no GitHub. Consulte [instalação, uso e limites da organização](docs/ORGANIZATION.md).
+
+
+## Incremental: índice por tamanho, Merkle e MinHash
+
+O destino agora é indexado inicialmente por tamanho, sem hash de todo o conteúdo. Apenas classes solicitadas por arquivos de origem são lidas; uma cópia reutilizada continua sendo revalidada. Arquivos pequenos e únicos também são copiados e verificados.
+
+Cada execução gera `merkle.json`, `merkle.sha256`, `metricas.json` e, havendo manifesto anterior, `merkle-delta.csv`. O painel da opção 8 acrescenta relações entre pastas com MinHash/LSH e Jaccard. [Veja o funcionamento e as limitações](docs/INCREMENTAL.md).
+
+**Merkle compara inventários observados; não dispensa releitura das origens com base em datas/tamanhos. MinHash sugere relações; não decide exclusões.**
