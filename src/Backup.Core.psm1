@@ -9,6 +9,7 @@ Set-StrictMode -Version Latest
 . "$PSScriptRoot\Backup.Progress.ps1"
 . "$PSScriptRoot\Backup.Discovery.ps1"
 . "$PSScriptRoot\Backup.Policy.ps1"
+. "$PSScriptRoot\Backup.Merkle.ps1"
 
 function Test-PathWithin {
     param([string]$Path, [string]$Root)
@@ -72,6 +73,7 @@ function Get-BackupHash {
     if ($Source) { Assert-SourceFileAvailable $Path } else { Assert-PlainPath $Path }
     $stream = [IO.File]::Open($Path, 'Open', 'Read', 'Read')
     $sha = [Security.Cryptography.SHA256]::Create()
+    $timer = [Diagnostics.Stopwatch]::StartNew()
     try {
         $buffer = New-Object byte[] ([int][Math]::Max(1, [Math]::Min(4MB, $stream.Length)))
         $readTotal = [long]0
@@ -85,7 +87,11 @@ function Get-BackupHash {
         Show-BackupProgress -Phase 'Calculando SHA-256' -Path $Path -ReadBytes $readTotal -TotalBytes $stream.Length -FileCompleted
         return [BitConverter]::ToString($sha.Hash).Replace('-','')
     }
-    finally { $sha.Dispose(); $stream.Dispose() }
+    finally {
+        $timer.Stop()
+        if ($null -ne $script:BackupProgress) { $script:BackupProgress.HashSeconds += $timer.Elapsed.TotalSeconds }
+        $sha.Dispose(); $stream.Dispose()
+    }
 }
 
 function Copy-VerifiedFile {
@@ -140,7 +146,8 @@ function Get-ExistingBackupIndex {
     $index = @{}
     if (Test-Path -LiteralPath $Destination) {
         Get-BackupFiles $Destination -ExistingBackup -DependencyPolicy $DependencyPolicy -Dependencies $Dependencies | ForEach-Object {
-            $key = ([string]$_.Length) + '|' + (Get-BackupHash $_.FullName)
+            $key = '@size|' + ([string]$_.Length)
+            if ($null -ne $script:BackupProgress) { $script:BackupProgress.DestinationIndexedFiles++ }
             if (-not $index.ContainsKey($key)) { $index[$key] = New-Object 'Collections.Generic.List[string]' }
             $index[$key].Add($_.FullName)
         }
@@ -150,6 +157,21 @@ function Get-ExistingBackupIndex {
 
 function Find-ExistingContent {
     param([string]$SourceHash, [long]$Length, [hashtable]$Index)
+    $pending = '@size|' + ([string]$Length)
+    if ($Index.ContainsKey($pending)) {
+        # Resolve only lengths requested by a source; unrelated destination contents stay unread.
+        foreach ($candidate in $Index[$pending]) {
+            Assert-PlainPath $candidate
+            if ((Get-Item -LiteralPath $candidate -ErrorAction Stop).Length -ne $Length) { continue }
+            $candidateHash = Get-BackupHash $candidate
+            $candidateKey = ([string]$Length) + '|' + $candidateHash
+            if (-not $Index.ContainsKey($candidateKey)) { $Index[$candidateKey] = New-Object 'Collections.Generic.List[string]' }
+            $Index[$candidateKey].Add($candidate)
+            if ($null -ne $script:BackupProgress) { $script:BackupProgress.DestinationHashCandidates++ }
+        }
+        $Index.Remove($pending)
+        if ($null -ne $script:BackupProgress) { $script:BackupProgress.SizeBucketsResolved++ }
+    }
     $key = ([string]$Length) + '|' + $SourceHash
     if ($Index.ContainsKey($key)) {
         foreach ($candidate in $Index[$key]) {
@@ -214,7 +236,7 @@ function Invoke-BackupPlan {
             catch { Write-Warning "Abra manualmente o acompanhamento em $run. O navegador não pôde ser iniciado." }
         }
         Show-BackupProgress -Phase 'Indexando backup existente' -Path $destinationPath
-        # Finish indexing the selected backup folder before copying anything.
+        # Enumerate the destination safely before copying; hash size-matched candidates on demand.
         try { $index = Get-ExistingBackupIndex $destinationPath -DependencyPolicy $DependencyPolicy -Dependencies $indexSkipped }
         catch {
             $null = Assert-ExternalDestination $run $sourcePaths $identity
@@ -313,6 +335,17 @@ function Invoke-BackupPlan {
             $errors += $issues.Count
             $issues | Export-Csv -LiteralPath (Join-Path $run 'falhas-enumeracao.csv') -NoTypeInformation -Encoding UTF8
         }
+        try {
+            Write-BackupManifest -Run $run -Sources $Sources -ExcludedPaths $ExcludedPaths -DependencyPolicy $DependencyPolicy -Errors $errors -Dependencies $dependencies
+        } catch {
+            $errors++
+            $_.Exception.Message | Add-Content -LiteralPath (Join-Path $run 'erros.txt') -ErrorAction Stop
+        }
+        [pscustomobject]@{HashReads=$script:BackupProgress.Files;HashBytes=$script:BackupProgress.Bytes;
+            HashSeconds=$script:BackupProgress.HashSeconds;DestinationIndexedFiles=$script:BackupProgress.DestinationIndexedFiles;
+            DestinationHashCandidates=$script:BackupProgress.DestinationHashCandidates;SizeBucketsResolved=$script:BackupProgress.SizeBucketsResolved;
+            ElapsedSeconds=([DateTime]::UtcNow-$script:BackupProgress.Started).TotalSeconds} |
+            ConvertTo-Json | Set-Content -LiteralPath (Join-Path $run 'metricas.json') -Encoding UTF8
         [pscustomobject]@{Mode=$Mode; Errors=$errors; Report=$run; FormattingDecision='NOT_ASSESSED';
             DiskId=$identity.DiskId; VolumeId=$identity.VolumeId; DependencyPolicy=$DependencyPolicy; DependencyFolders=$dependencies.Count} |
             ConvertTo-Json | Set-Content -LiteralPath (Join-Path $run 'resumo.json') -Encoding UTF8
@@ -329,4 +362,4 @@ Export-ModuleMember -Function Assert-BackupDependencies, Write-BackupReview, Tes
     Assert-PlainPath, Get-StorageIdentity, Assert-ExternalDestination, Select-BackupDestination,
     Get-ExistingBackupIndex, Find-ExistingContent, New-BackupConfiguration,
     Get-ReparseTag, Test-CloudReparseTag, Assert-SourceFileAvailable, Get-AutomaticBackupPlan,
-    Start-BackupProgress, Show-BackupProgress, Stop-BackupProgress, Get-DependencyFolder
+    Start-BackupProgress, Show-BackupProgress, Stop-BackupProgress, Get-DependencyFolder, Get-MerkleDigest, Write-BackupManifest, Compare-BackupManifest

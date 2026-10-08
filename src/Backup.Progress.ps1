@@ -2,7 +2,7 @@
 $script:BackupProgress = $null
 function Start-BackupProgress {
     param([string]$Mode)
-    $script:BackupProgress = @{Started=[DateTime]::UtcNow;LastHost=[DateTime]::MinValue;LastBar=[DateTime]::MinValue;Files=0;Bytes=[long]0;Phase=$Mode;AuditFiles=0;AuditBytes=[long]0;Results=@{};LastPartial=[DateTime]::MinValue}
+    $script:BackupProgress = @{Started=[DateTime]::UtcNow;LastHost=[DateTime]::MinValue;LastBar=[DateTime]::MinValue;Files=0;Bytes=[long]0;Phase=$Mode;AuditFiles=0;AuditBytes=[long]0;Results=@{};LastPartial=[DateTime]::MinValue;HashSeconds=0.0;DestinationIndexedFiles=0;DestinationHashCandidates=0;SizeBucketsResolved=0}
     Write-Host "[$Mode] Iniciando. Ctrl+C interrompe a execução; uma execução interrompida não confirma cobertura."
 }
 function Show-BackupProgress {
