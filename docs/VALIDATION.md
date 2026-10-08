@@ -1,11 +1,15 @@
 # Validação
 
-Em 08/10/2026, **56 testes Pester passaram, 0 falhas, 0 ignorados**, em Windows Server 2025 com Windows PowerShell 5.1 e Robocopy real. Também passaram **5 testes Python** da análise hierárquica somente leitura (61 testes ao todo).
+Em 08/10/2026, **56 testes Pester passaram, 0 falhas, 0 ignorados**, em Windows Server 2025 com Windows PowerShell 5.1 e Robocopy real. Também passaram **17 testes Python**, incluindo análise hierárquica, catálogo e interação real com Chrome headless no Windows (73 testes ao todo).
 
-- Commit de código testado: b821321e42d61b37958b37b7b96cb2a0f8b291cc
-- Execução: https://github.com/eduardoapgomes/windows-backup-audit/actions/runs/37781086729
+- Commit de código testado: a1d79733cfd98e01eac6186f8bdd3ae546783fdc
+- Execução: https://github.com/eduardoapgomes/windows-backup-audit/actions/runs/37793440018
 
 ## Cobertura executada
+
+- Catálogo contextual: limites de candidatos, preservação de projetos, pacotes instalados não classificados como projetos independentes, ambiguidade, evidência fraca de nomes pessoais, hashes ausentes/erros, contagens de cobertura e entradas CSV parciais.
+- Saídas somente leitura: inventário inalterado, caminhos inexistentes nunca abertos, recusa de saída já existente, nomes HTML hostis e fórmulas CSV escapados.
+- Chrome headless no Windows: navegação hierárquica, busca, gráfico de relações, sugestões e nomes hostis exibidos como texto. O seletor gráfico e o acompanhamento prolongado continuam dependendo de validação manual.
 
 - Política de bibliotecas com evidência: auditoria sem enumeração profunda, modo Include, preservação de projetos e manifests, junction rejeitada, dados essenciais antes das dependências, omissão explícita por falta de espaço/erros e reutilização de cópia manual de bibliotecas em outro caminho.
 - Análise somente leitura do inventário: fingerprint estável e sensível ao conteúdo observado, limites de grupos/pares, estrutura de projetos preservada, Jaccard, NCD opcional, HTML escapado e nenhuma declaração de cobertura completa a partir de inventário parcial.
