@@ -31,7 +31,8 @@
 function Get-DirectoryPriority {
     param([string]$Path)
     switch ([IO.Path]::GetFileName($Path).ToLowerInvariant()) {
-        {$_ -in @('documents','documentos','desktop','área de trabalho','pictures','imagens','downloads','projetos','projects','jupyter')} { return 0 }
+        {$_ -in @('users','documents','documentos','desktop','área de trabalho','pictures','imagens','downloads','projetos','projects','jupyter')} { return 0 }
+        'onedrive' { return 1 }
         {$_ -in @('appdata','programdata','node_modules','site-packages')} { return 9 }
         default { return 5 }
     }

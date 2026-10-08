@@ -23,7 +23,7 @@ Os tipos internos habilitados são SATA, ATA, NVMe, SAS, SCSI e RAID; volumes of
 
 Exclusões explícitas na raiz de cada volume: Windows, Program Files, Program Files (x86), Boot, EFI, Recovery, Config.Msi, $RECYCLE.BIN, System Volume Information e arquivos de paginação/hibernação/boot. Os principais arquivos NTUSER do perfil atual também são excluídos. **Users, AppData e ProgramData não são descartados em bloco.** Perfis protegidos podem gerar erros de acesso, que são registrados sem interromper as demais pastas. Não alteramos permissões.
 
-**Anaconda:** .conda, .jupyter, .ipython, notebooks, scripts e pastas próprias dentro de Users permanecem na varredura. Instalações Anaconda/Miniconda dentro do perfil também permanecem, porque podem conter trabalhos e configurações misturados aos ambientes; isso pode aumentar o volume. Instalações dentro de Program Files seguem a exclusão de software: se você salvou trabalhos ali, inclua essa pasta em uma execução manual. A cópia de um ambiente não garante que ele será executável após reinstalar; preserve também environment.yml/requirements.txt ou exporte o ambiente pelo próprio Conda.
+**Anaconda:** .conda, .jupyter, .ipython, notebooks, scripts e pastas próprias dentro de Users permanecem na varredura. Instalações Anaconda/Miniconda dentro do perfil são examinadas preservando trabalhos e metadados; o componente Lib\site-packages reconhecido é tratado como biblioteca opcional pela política Auto. Isso não garante reinstalação idêntica do ambiente. Instalações dentro de Program Files seguem a exclusão de software: se você salvou trabalhos ali, inclua essa pasta em uma execução manual. A cópia de um ambiente não garante que ele será executável após reinstalar; preserve também environment.yml/requirements.txt ou exporte o ambiente pelo próprio Conda.
 
 A descoberta não cobre rede nem volumes sem letra e não produz uma imagem do sistema. Revise a lista de exclusões: arquivos pessoais armazenados dentro de diretórios excluídos exigem uma execução manual específica.
 
@@ -50,6 +50,16 @@ powershell.exe -NoProfile -STA -File .\Backup.ps1 -Mode Backup -AutoDiscover -Se
 ```
 
 O backup redescobre o escopo no momento da execução. Confira seu novo plano/relatório, pois pastas e volumes podem ter mudado desde a auditoria. Escolha a mesma pasta de destino para reutilizar as cópias existentes.
+
+### Bibliotecas opcionais e decisões por pasta
+
+Agora o padrão é **Auto**: a auditoria identifica bibliotecas Node/Python com marcadores e não entra em todos os arquivos dessas pastas. Elas aparecem em `dependencias.csv` como adiadas, sem tamanho inventado. O índice inicial do destino também adia bibliotecas reconhecidas; consulte `indice-excluido.csv`. Documentos, código próprio, notebooks, manifests/lockfiles e metadados de ambiente continuam no fluxo essencial.
+
+No Backup, bibliotecas reconhecidas são consideradas **depois** dos dados essenciais, se não houver erros anteriores e houver espaço para o tamanho lógico da pasta mais 256 MiB. A verificação por conteúdo e as proteções do HD continuam valendo. Falta de espaço deixa a biblioteca opcional sem cópia, registrada como tal; nunca é contada como protegida. Não compactamos automaticamente nesta versão.
+
+Para excluir bibliotecas também do backup, use `-DependencyPolicy Exclude`. Para voltar ao exame completo, use `-DependencyPolicy Include`. Pastas inteiras chamadas venv/anaconda não são descartadas: somente os componentes de bibliotecas reconhecidos. Se você modificou código dentro de node_modules/site-packages ou depende de pacotes privados indisponíveis, use Include.
+
+[Veja as regras, limites e o experimento de análise hierárquica](docs/HIERARCHY.md). Ele usa Jaccard e, opcionalmente, NCD sobre manifests de caminhos, sem mover arquivos nem decidir o que descartar. Não é agrupamento por assunto validado.
 
 ### OneDrive
 

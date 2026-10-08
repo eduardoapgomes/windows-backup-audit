@@ -68,6 +68,18 @@ Describe 'Hierarchical dependency policy' {
         [IO.File]::ReadAllText("$dest\project\node_modules\package\library.js") | Should -Be 'reinstallable'
         (Import-Csv "$run\dependencias.csv").Decision | Should -Be OPTIONAL_VERIFIED
     }
+    It 'reuses an existing manual library after the essential phase without making a duplicate' {
+        Mock Assert-ExternalDestination -ModuleName Backup.Core { @{DiskId='test';VolumeId='test';FreeBytes=100GB;Drive='Z:\'} }
+        $dest=New-Item -ItemType Directory (Join-Path $TestDrive 'manual-library-destination')
+        New-Item -ItemType Directory "$dest\old\node_modules\other-package" -Force | Out-Null
+        [IO.File]::WriteAllText("$dest\old\package.json",'{}')
+        [IO.File]::WriteAllText("$dest\old\node_modules\other-package\different.js",'reinstallable')
+        $run=Invoke-BackupPlan @(@{Id='project';Path=$project.FullName}) $dest.FullName Backup
+        $library=Import-Csv "$run\inventario.csv" | Where-Object Priority -eq OPTIONAL_DEPENDENCY
+        $library.Status | Should -Be REUSED_EXISTING
+        $library.Destination | Should -Be "$dest\old\node_modules\other-package\different.js"
+        Test-Path "$dest\project\node_modules\package\library.js" | Should -BeFalse
+    }
     It 'records optional space omission but still copies essential data' {
         Mock Assert-ExternalDestination -ModuleName Backup.Core { @{DiskId='test';VolumeId='test';FreeBytes=64MB;Drive='Z:\'} }
         $dest=New-Item -ItemType Directory (Join-Path $TestDrive 'low-space-destination')
