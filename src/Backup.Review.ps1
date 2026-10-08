@@ -54,6 +54,7 @@ function Write-BackupReview {
         }
     }
     $lines.Add('Consulte falhas-enumeracao.csv para pastas/links inacessíveis. Exclusões não são dados protegidos pelo backup.')
+    $lines.Add('Bibliotecas opcionais: consulte dependencias.csv e a tabela do HTML. Pastas adiadas/excluídas não contam como backup confirmado; tamanhos não medidos não significam zero. indice-excluido.csv registra bibliotecas omitidas do índice inicial do destino.')
     $lines.Add('## Resultados por status')
     $lines.Add('O índice cobre somente a pasta de backup escolhida. Duplicatas manuais existentes não são apagadas. Falhas na leitura interrompem a confirmação de cobertura.')
     foreach ($status in ($statuses.Keys | Sort-Object)) { $lines.Add("- ${status}: $($statuses[$status])") }

@@ -8,6 +8,7 @@ Set-StrictMode -Version Latest
 . "$PSScriptRoot\Backup.Partial.ps1"
 . "$PSScriptRoot\Backup.Progress.ps1"
 . "$PSScriptRoot\Backup.Discovery.ps1"
+. "$PSScriptRoot\Backup.Policy.ps1"
 
 function Test-PathWithin {
     param([string]$Path, [string]$Root)
@@ -19,7 +20,9 @@ function Test-PathWithin {
 
 function Get-BackupFiles {
     param([string]$Root, [switch]$ExistingBackup, [string[]]$ExcludedPaths=@(),
-        [Collections.Generic.List[object]]$Issues)
+        [Collections.Generic.List[object]]$Issues,
+        [ValidateSet('Auto','Exclude','Include')][string]$DependencyPolicy='Include',
+        [Collections.Generic.List[object]]$Dependencies, [string]$OwnerId='', [string]$OwnerRoot='')
     Assert-PlainPath $Root -AllowCloudSource:(-not $ExistingBackup)
     $stack = New-Object 'Collections.Generic.Stack[string]'
     $stack.Push($Root)
@@ -28,12 +31,23 @@ function Get-BackupFiles {
         Show-BackupProgress -Phase 'Enumerando pastas' -Path $directory
         try {
             Assert-PlainPath $directory -AllowCloudSource:(-not $ExistingBackup)
+            if ($DependencyPolicy -ne 'Include') {
+                $decision=Get-DependencyFolder $directory
+                if ($null -ne $decision) {
+                    $decision.OwnerId=$OwnerId; $decision.OwnerRoot=$OwnerRoot
+                    $decision.Decision=if ($ExistingBackup) {'INDEX_NOT_SCANNED'} elseif ($DependencyPolicy -eq 'Exclude') {'EXCLUDED_BY_POLICY'} else {'DEFERRED'}
+                    if ($null -ne $Dependencies) { $Dependencies.Add($decision) }
+                    Save-BackupDecisions
+                    continue
+                }
+            }
             $items = @(Get-ChildItem -LiteralPath $directory -Force -ErrorAction Stop)
         } catch {
             if ($ExistingBackup -or $null -eq $Issues) { throw }
             $Issues.Add([pscustomobject]@{Path=$directory;Status='ERROR';Reason=$_.Exception.Message})
             continue
         }
+        $directories=New-Object 'Collections.Generic.List[string]'
         foreach ($item in $items) {
             if (@($ExcludedPaths | Where-Object { Test-PathWithin $item.FullName $_ }).Count) { continue }
             if ($ExistingBackup -and ($item.Name -eq '_RELATORIOS' -or $item.Name -eq '.backup.lock' -or
@@ -42,12 +56,14 @@ function Get-BackupFiles {
                 if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
                     Assert-PlainPath $item.FullName -AllowCloudSource:(-not $ExistingBackup)
                 }
-                if ($item.PSIsContainer) { $stack.Push($item.FullName) } else { $item }
+                if ($item.PSIsContainer) { $directories.Add($item.FullName) } else { $item }
             } catch {
                 if ($ExistingBackup -or $null -eq $Issues) { throw }
                 $Issues.Add([pscustomobject]@{Path=$item.FullName;Status='ERROR';Reason=$_.Exception.Message})
             }
         }
+        # LIFO: push lower-priority directories first so personal folders run first.
+        foreach ($child in ($directories | Sort-Object @{Expression={Get-DirectoryPriority $_};Descending=$true}, @{Expression={$_};Descending=$true})) { $stack.Push($child) }
     }
 }
 
@@ -120,10 +136,10 @@ function Copy-VerifiedFile {
 }
 
 function Get-ExistingBackupIndex {
-    param([string]$Destination)
+    param([string]$Destination, [string]$DependencyPolicy='Include', [Collections.Generic.List[object]]$Dependencies)
     $index = @{}
     if (Test-Path -LiteralPath $Destination) {
-        Get-BackupFiles $Destination -ExistingBackup | ForEach-Object {
+        Get-BackupFiles $Destination -ExistingBackup -DependencyPolicy $DependencyPolicy -Dependencies $Dependencies | ForEach-Object {
             $key = ([string]$_.Length) + '|' + (Get-BackupHash $_.FullName)
             if (-not $index.ContainsKey($key)) { $index[$key] = New-Object 'Collections.Generic.List[string]' }
             $index[$key].Add($_.FullName)
@@ -146,7 +162,8 @@ function Find-ExistingContent {
 
 function Invoke-BackupPlan {
     param([object[]]$Sources, [string]$Destination, [ValidateSet('Audit','Backup')][string]$Mode = 'Audit',
-        [object[]]$Discovery=@(), [string[]]$ExcludedPaths=@(), [string]$Scope='Configuração manual', [switch]$OpenReport)
+        [object[]]$Discovery=@(), [string[]]$ExcludedPaths=@(), [string]$Scope='Configuração manual', [switch]$OpenReport,
+        [ValidateSet('Auto','Exclude','Include')][string]$DependencyPolicy='Auto')
     Assert-BackupDependencies -Mode $Mode
     if (-not $Sources -or $Sources.Count -eq 0) { throw 'Configure pelo menos uma origem.' }
     $sourcePaths = @($Sources | ForEach-Object { [string]$_.Path })
@@ -178,14 +195,18 @@ function Invoke-BackupPlan {
         $seen = New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
         $errors = @($Discovery | Where-Object Status -eq ERROR).Count
         $issues = New-Object 'Collections.Generic.List[object]'
+        $dependencies=New-Object 'Collections.Generic.List[object]'
+        $indexSkipped=New-Object 'Collections.Generic.List[object]'
         $csv = Join-Path $run 'inventario.csv'
         $Discovery | Export-Csv -LiteralPath (Join-Path $run 'cobertura.csv') -NoTypeInformation -Encoding UTF8
-        [pscustomobject]@{Scope=$Scope;Sources=$Sources;ExcludedPaths=$ExcludedPaths;Discovery=$Discovery} |
+        [pscustomobject]@{Scope=$Scope;Sources=$Sources;ExcludedPaths=$ExcludedPaths;Discovery=$Discovery;DependencyPolicy=$DependencyPolicy} |
             ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $run 'plano.json') -Encoding UTF8
         $script:BackupProgress.Run=$run
         $script:BackupProgress.Identity=$identity
         $script:BackupProgress.SourcePaths=$sourcePaths
         $script:BackupProgress.EnumerationIssues=$issues
+        $script:BackupProgress.Dependencies=$dependencies
+        $script:BackupProgress.IndexSkipped=$indexSkipped
         Write-Host "Acompanhamento parcial: $(Join-Path $run 'ANDAMENTO.html')"
         Write-BackupPartial -Phase 'Iniciando comparação' -Path $destinationPath
         if ($OpenReport) {
@@ -194,7 +215,7 @@ function Invoke-BackupPlan {
         }
         Show-BackupProgress -Phase 'Indexando backup existente' -Path $destinationPath
         # Finish indexing the selected backup folder before copying anything.
-        try { $index = Get-ExistingBackupIndex $destinationPath }
+        try { $index = Get-ExistingBackupIndex $destinationPath -DependencyPolicy $DependencyPolicy -Dependencies $indexSkipped }
         catch {
             $null = Assert-ExternalDestination $run $sourcePaths $identity
             $_.Exception.Message | Set-Content -LiteralPath (Join-Path $run 'erros.txt') -Encoding UTF8
@@ -202,10 +223,44 @@ function Invoke-BackupPlan {
             Write-BackupPartial -Phase 'Índice incompleto' -Finished
             throw "Índice do backup incompleto; nenhuma cópia iniciada. Consulte $run"
         }
-        foreach ($source in $Sources) {
-            $root = [IO.Path]::GetFullPath($source.Path).TrimEnd('\')
+        $optionalIndexed=$false
+        $tasks=New-Object 'Collections.Generic.List[object]'
+        foreach ($source in $Sources) { $tasks.Add([pscustomobject]@{Id=$source.Id;Path=$source.Path;BasePath=$source.Path;Optional=$false;Decision=$null}) }
+        for ($taskNumber=0; $taskNumber -lt $tasks.Count; $taskNumber++) {
+            $source=$tasks[$taskNumber]
+            $root = [IO.Path]::GetFullPath($source.BasePath).TrimEnd('\')
             try {
-                Get-BackupFiles $source.Path -ExcludedPaths $ExcludedPaths -Issues $issues | ForEach-Object {
+                $optionalFiles=$null
+                if ($source.Optional) {
+                    if ($errors -gt 0 -or $issues.Count -gt 0) {
+                        $source.Decision.Decision='NOT_COPIED_ESSENTIAL_OR_PREVIOUS_ERRORS'; Save-BackupDecisions; continue
+                    }
+                    Show-BackupProgress -Phase 'Dimensionando bibliotecas opcionais' -Path $source.Path
+                    $optionalFiles=@(Get-BackupFiles $source.Path -Issues $issues)
+                    $estimated=[long](($optionalFiles | Measure-Object Length -Sum).Sum)
+                    $source.Decision.EstimatedBytes=$estimated
+                    if ($issues.Count -gt 0) { $source.Decision.Decision='NOT_COPIED_ENUMERATION_ERRORS'; Save-BackupDecisions; continue }
+                    $space=Assert-ExternalDestination $destinationPath $sourcePaths $identity
+                    if ($space.FreeBytes -lt ($estimated + 256MB)) {
+                        $source.Decision.Decision='NOT_COPIED_SPACE'; Save-BackupDecisions; continue
+                    }
+                    if (-not $optionalIndexed) {
+                        foreach ($skipped in $indexSkipped) {
+                            $extra=Get-ExistingBackupIndex $skipped.Path
+                            foreach ($key in $extra.Keys) {
+                                if (-not $index.ContainsKey($key)) { $index[$key]=New-Object 'Collections.Generic.List[string]' }
+                                foreach ($candidate in $extra[$key]) { $index[$key].Add($candidate) }
+                            }
+                        }
+                        $optionalIndexed=$true
+                    }
+                    $source.Decision.Decision='COPYING_OPTIONAL'; Save-BackupDecisions
+                }
+                $getFiles = {
+                    if ($source.Optional) { $optionalFiles }
+                    else { Get-BackupFiles $source.Path -ExcludedPaths $ExcludedPaths -Issues $issues -DependencyPolicy $DependencyPolicy -Dependencies $dependencies -OwnerId $source.Id -OwnerRoot $source.BasePath }
+                }
+                & $getFiles | ForEach-Object {
                     $file = $_
                     if ($seen.Add($file.FullName)) {
                         $relative = $file.FullName.Substring($root.Length + 1)
@@ -230,7 +285,7 @@ function Invoke-BackupPlan {
                         $null = Assert-ExternalDestination $csv $sourcePaths $identity
                         [pscustomobject]@{Source=$file.FullName; RelativePath=('.\' + $relative); RootId=$source.Id;
                             PlannedDestination=$target; Destination=$actual; Bytes=$file.Length;
-                            SHA256=$hash; Status=$status; Error=$message; Category=(Get-BackupCategory $file.FullName)} |
+                            SHA256=$hash; Status=$status; Error=$message; Category=(Get-BackupCategory $file.FullName); Priority=$(if ($source.Optional) {'OPTIONAL_DEPENDENCY'} else {'ESSENTIAL'})} |
                             Export-Csv -LiteralPath $csv -Append -NoTypeInformation -Encoding UTF8 -ErrorAction Stop
                         $script:BackupProgress.AuditFiles++
                         $script:BackupProgress.AuditBytes += $file.Length
@@ -244,14 +299,22 @@ function Invoke-BackupPlan {
                 $null = Assert-ExternalDestination $run $sourcePaths $identity
                 $_.Exception.Message | Add-Content -LiteralPath (Join-Path $run 'erros.txt') -ErrorAction Stop
             }
+            if ($source.Optional) { $source.Decision.Decision=if ($errors -or $issues.Count) {'OPTIONAL_INCOMPLETE'} else {'OPTIONAL_VERIFIED'} }
+            if ($taskNumber -eq ($Sources.Count - 1) -and $Mode -eq 'Backup' -and $DependencyPolicy -eq 'Auto') {
+                foreach ($decision in $dependencies) {
+                    $tasks.Add([pscustomobject]@{Id=$decision.OwnerId;Path=$decision.Path;BasePath=$decision.OwnerRoot;Optional=$true;Decision=$decision})
+                }
+            }
+            Save-BackupDecisions
         }
+        Save-BackupDecisions
         $null = Assert-ExternalDestination $run $sourcePaths $identity
         if ($issues.Count) {
             $errors += $issues.Count
             $issues | Export-Csv -LiteralPath (Join-Path $run 'falhas-enumeracao.csv') -NoTypeInformation -Encoding UTF8
         }
         [pscustomobject]@{Mode=$Mode; Errors=$errors; Report=$run; FormattingDecision='NOT_ASSESSED';
-            DiskId=$identity.DiskId; VolumeId=$identity.VolumeId} |
+            DiskId=$identity.DiskId; VolumeId=$identity.VolumeId; DependencyPolicy=$DependencyPolicy; DependencyFolders=$dependencies.Count} |
             ConvertTo-Json | Set-Content -LiteralPath (Join-Path $run 'resumo.json') -Encoding UTF8
         Write-BackupReview -Run $run -Sources $Sources -Mode $Mode -Errors $errors
         Write-BackupPartial -Phase 'Execução encerrada' -Finished
@@ -266,4 +329,4 @@ Export-ModuleMember -Function Assert-BackupDependencies, Write-BackupReview, Tes
     Assert-PlainPath, Get-StorageIdentity, Assert-ExternalDestination, Select-BackupDestination,
     Get-ExistingBackupIndex, Find-ExistingContent, New-BackupConfiguration,
     Get-ReparseTag, Test-CloudReparseTag, Assert-SourceFileAvailable, Get-AutomaticBackupPlan,
-    Start-BackupProgress, Show-BackupProgress, Stop-BackupProgress
+    Start-BackupProgress, Show-BackupProgress, Stop-BackupProgress, Get-DependencyFolder

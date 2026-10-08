@@ -6,7 +6,8 @@ param(
     [switch]$SelectDestination,
     [switch]$Setup,
     [switch]$OpenReport,
-    [switch]$AutoDiscover
+    [switch]$AutoDiscover,
+    [ValidateSet('Auto','Exclude','Include')][string]$DependencyPolicy='Auto'
 )
 cd $PSScriptRoot
 $ErrorActionPreference = 'Stop'
@@ -32,7 +33,7 @@ try {
     if ($SelectDestination -or [string]::IsNullOrWhiteSpace($destination)) {
         $destination = Select-BackupDestination @($plan.Sources | ForEach-Object { $_.Path })
     }
-    $report = Invoke-BackupPlan -Sources $plan.Sources -Destination $destination -Mode $Mode -OpenReport:$OpenReport @options
+    $report = Invoke-BackupPlan -Sources $plan.Sources -Destination $destination -Mode $Mode -OpenReport:$OpenReport -DependencyPolicy $DependencyPolicy @options
 
     $report
 } catch { Write-Error $_ -ErrorAction Continue; exit 2 }

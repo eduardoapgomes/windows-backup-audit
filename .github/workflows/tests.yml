@@ -11,3 +11,7 @@ jobs:
           Install-Module Pester -RequiredVersion 5.7.1 -Force -Scope CurrentUser -SkipPublisherCheck
           Import-Module Pester -RequiredVersion 5.7.1
           Invoke-Pester -Path ./tests -CI
+
+      - name: Read-only hierarchy analysis tests
+        shell: powershell
+        run: python -m unittest discover -s tests -p test_hierarchy.py -v

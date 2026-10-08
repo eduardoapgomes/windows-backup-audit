@@ -13,7 +13,7 @@ function New-BackupConfiguration { param($Path) Write-Output ('SETUP:' + $Path) 
 function Get-AutomaticBackupPlan { [pscustomobject]@{Destination='';Sources=@(@{Id='AUTO';Path='C:\Personal'});Discovery=@();ExcludedPaths=@()} }
 function Select-BackupDestination { param($Sources) 'E:\Chosen' }
 function Invoke-BackupPlan {
-    param($Sources, $Destination, $Mode, $Discovery, $ExcludedPaths, $Scope, [switch]$OpenReport)
+    param($Sources, $Destination, $Mode, $Discovery, $ExcludedPaths, $Scope, [switch]$OpenReport, $DependencyPolicy)
     Write-Output ("PLAN:" + $Sources[0].Id + ":" + $Mode + ":" + $Destination)
 }
 Export-ModuleMember -Function *

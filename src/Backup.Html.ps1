@@ -107,6 +107,14 @@ function Write-BackupHtml {
         foreach ($row in $failures) { $null=$html.Append('<tr><td>'+(ConvertTo-BackupHtmlText $row.Path)+'</td><td>'+(ConvertTo-BackupHtmlText $row.Reason)+'</td></tr>') }
         $null=$html.Append('</tbody></table>')
     } else { $null=$html.Append('<p>Nenhuma pendência detalhada nos CSVs. Confira também erros.txt, se existir.</p>') }
+    $dependencyPath=Join-Path $Run 'dependencias.csv'
+    if (Test-Path -LiteralPath $dependencyPath) {
+        $null=$html.Append('<h2>Bibliotecas opcionais — cobertura separada</h2><p>Uma pasta adiada/excluída não foi examinada arquivo a arquivo e não conta como protegida. Tamanho vazio significa não medido. A presença de um marcador não garante reinstalação idêntica: preserve lockfiles, receitas e pacotes locais. Include restaura o exame completo.</p><table><tr><th>Pasta</th><th>Decisão</th><th>Evidência</th></tr>')
+        foreach ($row in (Import-Csv -LiteralPath $dependencyPath)) {
+            $null=$html.Append('<tr><td>'+(ConvertTo-BackupHtmlText $row.Path)+'</td><td>'+(ConvertTo-BackupHtmlText $row.Decision)+'</td><td>'+(ConvertTo-BackupHtmlText $row.Evidence)+'</td></tr>')
+        }
+        $null=$html.Append('</table><p><a href="dependencias.csv">Decisões completas</a> · <a href="indice-excluido.csv">Pastas não examinadas no índice inicial do destino</a></p>')
+    }
     $null=$html.Append('<h2>Organização por tipo de arquivo</h2><p>Classificação para revisão; os arquivos originais não são movidos nem renomeados. A extensão não prova o conteúdo.</p><table><tr><th>Categoria</th><th>Arquivos</th><th>Tamanho</th></tr>')
     foreach ($category in ($categories.Keys | Sort-Object)) {
         $null=$html.Append('<tr><td>'+(ConvertTo-BackupHtmlText $category)+'</td><td>'+$categories[$category].Files+'</td><td>'+(Format-BackupSize $categories[$category].Bytes)+'</td></tr>')
