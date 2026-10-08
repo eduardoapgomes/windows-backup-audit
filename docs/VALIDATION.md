@@ -1,11 +1,14 @@
 # Validação
 
-Em 07/10/2026, **47 testes passaram, 0 falhas, 0 ignorados**, em Windows Server 2025 com Windows PowerShell 5.1 e Robocopy real.
+Em 08/10/2026, **56 testes Pester passaram, 0 falhas, 0 ignorados**, em Windows Server 2025 com Windows PowerShell 5.1 e Robocopy real. Também passaram **5 testes Python** da análise hierárquica somente leitura (61 testes ao todo).
 
-- Commit de código testado: 112d1cd1bb535c26a673eb5747c2287a8f42a0de
-- Execução: https://github.com/eduardoapgomes/windows-backup-audit/actions/runs/37673392742
+- Commit de código testado: b821321e42d61b37958b37b7b96cb2a0f8b291cc
+- Execução: https://github.com/eduardoapgomes/windows-backup-audit/actions/runs/37781086729
 
 ## Cobertura executada
+
+- Política de bibliotecas com evidência: auditoria sem enumeração profunda, modo Include, preservação de projetos e manifests, junction rejeitada, dados essenciais antes das dependências, omissão explícita por falta de espaço/erros e reutilização de cópia manual de bibliotecas em outro caminho.
+- Análise somente leitura do inventário: fingerprint estável e sensível ao conteúdo observado, limites de grupos/pares, estrutura de projetos preservada, Jaccard, NCD opcional, HTML escapado e nenhuma declaração de cobertura completa a partir de inventário parcial.
 
 - Descoberta automática com metadados simulados: volumes internos de sistema/dados incluídos; USB excluído como origem; pastas redirecionadas, consolidação de raízes, identificadores estáveis e falhas de descoberta registradas.
 - Enumeração com junction real: continuação pelas demais pastas e respeito a exclusões explícitas; destino continua interrompendo diante de índice incompleto.
