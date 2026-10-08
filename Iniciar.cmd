@@ -11,9 +11,11 @@ echo WINDOWS BACKUP - escolha uma opcao
  echo 5. Backup das pastas da configuracao manual
  echo 6. Abrir documentacao
  echo 7. Editar configuracao manual existente
+ echo 8. Mapa visual e agrupamentos (Python; pode acompanhar auditoria)
  echo 0. Sair
-choice /c 12345670 /n /m "Opcao: "
-if errorlevel 8 exit /b 0
+choice /c 123456780 /n /m "Opcao: "
+if errorlevel 9 exit /b 0
+if errorlevel 8 goto catalogo
 if errorlevel 7 goto editar
 if errorlevel 6 goto docs
 if errorlevel 5 goto manualbackup
@@ -37,6 +39,9 @@ powershell.exe -NoProfile -STA -File "%~dp0Backup.ps1" -Mode Backup -SelectDesti
 goto resultado
 :docs
 start "" "https://github.com/eduardoapgomes/windows-backup-audit#readme"
+goto menu
+:catalogo
+start "Mapa dos arquivos" powershell.exe -NoProfile -STA -NoExit -File "%~dp0Organizar.ps1" -Watch
 goto menu
 :editar
 if not exist "%~dp0backup.local.json" goto ausente

@@ -11,7 +11,7 @@ if ($LASTEXITCODE -ne 0) { throw "A atualização falhou; confira a mensagem aci
 .\Iniciar.cmd
 ```
 
-Também pode dar dois cliques em **Iniciar.cmd**. Escolha **1 — Auditoria automática** para descobrir dados sem editar JSON. Depois de revisar o relatório, use **2 — Backup automático**. As opções **3, 4 e 5** configuram e executam o modo manual; **6** abre a documentação e **7** edita a configuração manual. Sua configuração existente é preservada; o modo automático não a utiliza nem a sobrescreve.
+Também pode dar dois cliques em **Iniciar.cmd**. Escolha **1 — Auditoria automática** para descobrir dados sem editar JSON. Depois de revisar o relatório, use **2 — Backup automático**. As opções **3, 4 e 5** configuram e executam o modo manual; **6** abre a documentação e **7** edita a configuração manual. A opção **8** abre o mapa visual e acompanha um inventário, inclusive durante outra execução (requer Python 3.9+). Sua configuração existente é preservada; o modo automático não a utiliza nem a sobrescreve.
 
 Na seleção de destino, escolha o HD USB e depois a pasta onde estão os backups manuais/parciais. Para começar um backup novo, escolha a raiz do HD: o programa cria sua pasta própria. A auditoria grava relatórios no HD, mas não copia seus arquivos. Arquivos iguais são comparados por SHA-256 e reutilizados dentro da pasta selecionada.
 
@@ -98,7 +98,7 @@ Projeto pré-formatação baseado na pesquisa **Backup Windows com PowerShell: i
 
 Windows 10/11, Windows PowerShell Desktop 5.1 e módulo Storage (Get-Disk/Get-Partition/Get-Volume). A interface usa Out-GridView e Windows Forms. O destino precisa ser um USB externo NTFS. O Robocopy acompanha o Windows e é necessário para copiar; o código verifica sua presença antes do modo Backup. O modo Audit não precisa dele.
 
-Git é necessário apenas para clonar e atualizar o projeto. Baixe o instalador em https://git-scm.com/download/win e abra uma nova janela do PowerShell depois da instalação. Pandoc, Python e Node.js não são necessários. Pester 5.7.1 é dependência apenas dos testes de desenvolvimento.
+Git é necessário apenas para clonar e atualizar o projeto. Baixe o instalador em https://git-scm.com/download/win e abra uma nova janela do PowerShell depois da instalação. Pandoc e Node.js não são necessários. Python não é necessário para o backup; o painel contextual opcional requer Python 3.9+ e usa somente a biblioteca padrão. Pester 5.7.1 é dependência apenas dos testes de desenvolvimento.
 
 ### 2. Clonar o repositório
 
@@ -234,3 +234,12 @@ O repositório público deve conter somente código, testes e documentação. Nu
 `src/Backup.Core.psm1`: funções de caminhos, enumeração, hash, transporte e coordenação. `Backup.ps1`: CLI/configuração. `tests`: contratos e integração. `reference/Research-Backup.ps1.txt`: implementação extensa da pesquisa, preservada para referência, com correção de expansão de `$RECYCLE` e transporte forçado após decisão de hash; referência textual não executável, não usada pelo motor modular.
 
 O projeto adapta recomendações da pesquisa; não apresenta o script extenso como produção testada. Licença MIT; consulte LICENSE.
+
+
+## Mapa visual e organização por contexto
+
+Após atualizar, abra `Iniciar.cmd` e escolha **8**. Selecione o `inventario.csv` dentro da pasta de relatórios da execução. Você pode abrir outro `Iniciar.cmd` enquanto a auditoria ou o backup trabalha: o painel acompanha alterações a cada 30 segundos, sem reler os arquivos originais.
+
+O painel tem navegação pelas pastas, barras de tamanho e cobertura, busca paginada com o caminho da cópia e um diagrama de relações candidatas. Arquivos diretamente em Downloads/Área de Trabalho são relacionados a projetos por nomes e hashes já observados. Casos ambíguos e sem evidência ficam explícitos. **Nenhum agrupamento muda caminhos, dispensa cópia ou apaga arquivos.** A organização é um catálogo adicional; a restauração continua baseada no inventário.
+
+O painel é salvo em uma pasta temporária local exclusiva, cujo caminho aparece no terminal. Para mantê-lo, copie a pasta inteira para um local de sua escolha. Ele contém caminhos pessoais: não publique no GitHub. Consulte [instalação, uso e limites da organização](docs/ORGANIZATION.md).
