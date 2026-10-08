@@ -26,6 +26,11 @@ class CatalogTests(unittest.TestCase):
         self.assertIn('Termos', suggestion['candidates'][0]['evidence'])
         self.assertFalse(data['automatic_file_actions'])
 
+    def test_person_name_overlap_alone_is_weak_context(self):
+        data = catalog.build_catalog([row(r'C:\courses\certificado_Ana_Silva.pdf'),
+            row(r'C:\Downloads\CV_Ana_Silva.pdf', 'b' * 64)])
+        self.assertEqual(data['suggestions'][0]['decision'], 'EVIDENCIA_FRACA')
+
     def test_same_names_not_duplicate_and_missing_hash_no_identity(self):
         data = catalog.build_catalog([row(r'C:\project\tese_solar.pdf', 'b' * 64),
             row(r'C:\Users\User\Downloads\tese_solar.pdf', '')])

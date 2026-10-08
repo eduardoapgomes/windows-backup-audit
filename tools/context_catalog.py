@@ -166,12 +166,18 @@ def build_catalog(rows):
             score = 1.0 if identical else len(shared) / max(1, len(words | set(groups[gid]['tokens'])))
             ranked.append({'group': groups[gid]['path'], 'score': round(score, 4),
                 'evidence': 'SHA256 observado igual' if identical else 'Termos em comum: ' + ', '.join(sorted(shared)),
-                'identity_observed': identical})
+                'identity_observed': identical,
+                'folder_name_support': bool(words & tokens(ntpath.basename(groups[gid]['path'])))})
         ranked.sort(key=lambda item: (-item['score'], item['group'].casefold()))
         decision = 'SEM_EVIDENCIA'
         if ranked:
             ambiguous = len(ranked) > 1 and ranked[0]['score'] - ranked[1]['score'] < 0.05
-            decision = 'AMBIGUO' if ambiguous else 'REVISAR_SUGESTAO'
+            if ambiguous:
+                decision = 'AMBIGUO'
+            elif ranked[0]['identity_observed'] or ranked[0]['folder_name_support']:
+                decision = 'REVISAR_SUGESTAO'
+            else:
+                decision = 'EVIDENCIA_FRACA'
         suggestions.append({'source': file['source'], 'destination': file['destination'],
             'status': file['status'], 'decision': decision, 'candidates': ranked[:3]})
     return {'scope': 'INVENTARIO_OBSERVADO', 'automatic_file_actions': False,
