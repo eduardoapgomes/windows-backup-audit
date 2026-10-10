@@ -32,8 +32,16 @@ function Write-BackupReview {
     $lines.Add('')
     $lines.Add("Modo: **$Mode**. Arquivos encontrados: **$count**. Tamanho lógico: **$bytes bytes**.")
     $lines.Add("Erros registrados: **$Errors**. Data UTC: $([DateTime]::UtcNow.ToString('o')).")
+    $quickAudit=$false
+    $planPath=Join-Path $Run 'plano.json'
+    if (Test-Path -LiteralPath $planPath) {
+        $plan=Get-Content -LiteralPath $planPath -Raw | ConvertFrom-Json
+        if ($plan.PSObject.Properties['QuickAudit']) { $quickAudit=[bool]$plan.QuickAudit }
+    }
     if ($Mode -eq 'Audit') {
-        $lines.Add('**Esta auditoria não copiou arquivos. Comparou conteúdo por SHA-256: NEEDS_COPY ainda precisa de cópia; SKIP_IDENTICAL/REUSED_EXISTING já têm uma cópia verificada na pasta selecionada.**')
+        if ($quickAudit) {
+            $lines.Add('**Auditoria rápida: não copiou arquivos. NEEDS_COPY pode ter SHA256 vazio quando não havia candidato de mesmo tamanho no destino. Cópias encontradas foram conferidas por SHA-256; arquivos novos ainda não foram verificados por conteúdo.**')
+        } else { $lines.Add('**Esta auditoria não copiou arquivos. Comparou conteúdo por SHA-256: NEEDS_COPY ainda precisa de cópia; SKIP_IDENTICAL/REUSED_EXISTING já têm uma cópia verificada na pasta selecionada.**') }
     } else {
         $lines.Add('VERIFIED: cópia validada por SHA-256. SKIP_IDENTICAL: mesmo caminho já válido. REUSED_EXISTING: conteúdo reutilizado em outro caminho. ERROR: arquivo não confirmado.')
     }
