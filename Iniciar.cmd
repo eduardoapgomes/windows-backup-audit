@@ -8,14 +8,14 @@ echo.
 echo PRIMEIRO USO: 1 confere sem copiar; depois 2 faz o backup.
 echo Para escolher apenas algumas pastas, use 3, 4 e 5.
 echo.
-echo 1. AUDITORIA AUTOMATICA - descobrir dados e comparar
-echo 2. BACKUP AUTOMATICO - descobrir, copiar e verificar
+echo 1. AUDITORIA FOCADA - revisar dados importantes (recomendado)
+echo 2. BACKUP FOCADO - copiar e verificar apos revisar
 echo 3. Configurar pastas manualmente (primeiro uso manual)
 echo 4. Auditoria das pastas da configuracao manual
 echo 5. Backup das pastas da configuracao manual
 echo 6. Abrir guia rapido de uso
 echo 7. Editar configuracao manual existente
-echo 8. Mapa visual e agrupamentos (Python; pode acompanhar auditoria)
+echo 8. Mapa opcional de pastas (Python; somente leitura)
 echo 0. Sair
 choice /c 123456780 /n /m "Opcao: "
 if errorlevel 9 exit /b 0
