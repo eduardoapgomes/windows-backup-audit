@@ -1,4 +1,4 @@
-# Descoberta conservadora: dados primeiro, sem percorrer o disco inteiro.
+﻿# Descoberta conservadora: dados primeiro, sem percorrer o disco inteiro.
 # O modo automatico seleciona pastas conhecidas e pastas de trabalho na superficie
 # dos volumes. Outras localizacoes exigem revisao e inclusao manual.
 function Get-PersonalFolderCandidates {
