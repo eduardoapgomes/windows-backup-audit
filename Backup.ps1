@@ -7,7 +7,8 @@ param(
     [switch]$Setup,
     [switch]$OpenReport,
     [switch]$AutoDiscover,
-    [ValidateSet('Auto','Exclude','Include')][string]$DependencyPolicy='Auto'
+    [ValidateSet('Auto','Exclude','Include')][string]$DependencyPolicy='Exclude',
+    [switch]$FullAudit
 )
 cd $PSScriptRoot
 $ErrorActionPreference = 'Stop'
@@ -26,7 +27,8 @@ try {
     $options = @{}
     if ($AutoDiscover) {
         $plan = Get-AutomaticBackupPlan
-        $options = @{Discovery=$plan.Discovery;ExcludedPaths=$plan.ExcludedPaths;Scope='Descoberta automática'}
+        $options = @{Discovery=$plan.Discovery;ExcludedPaths=$plan.ExcludedPaths;Scope='Descoberta automática focada'}
+        if ($Mode -eq 'Audit' -and -not $FullAudit) { $options.QuickAudit=$true }
     } else { $plan = Get-Content -LiteralPath $Config -Raw | ConvertFrom-Json }
     $destination = $null
     if ($plan.PSObject.Properties['Destination']) { $destination = [string]$plan.Destination }
