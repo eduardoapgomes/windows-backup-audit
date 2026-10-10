@@ -1,4 +1,4 @@
-BeforeAll { Import-Module "$PSScriptRoot/../src/Backup.Core.psm1" -Force }
+﻿BeforeAll { Import-Module "$PSScriptRoot/../src/Backup.Core.psm1" -Force }
 Describe 'Data-first automatic discovery' {
     BeforeEach {
         Mock Get-PersonalFolderCandidates -ModuleName Backup.Core {
