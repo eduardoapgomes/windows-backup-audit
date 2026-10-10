@@ -43,14 +43,14 @@ Export-ModuleMember -Function *
     It 'loads the default config beside the script with -File and -SelectDestination' {
         $output = & powershell.exe -NoProfile -STA -File "$fixture\Backup.ps1" -Mode Audit -SelectDestination
         $LASTEXITCODE | Should -Be 0
-        ($output -join '') | Should -Be 'PLAN:DEFAULT:Audit:E:\Chosen:QUICK=False:POLICY=Exclude'
+        ($output -join '') | Should -Be 'PLAN:DEFAULT:Audit:E:\Chosen:QUICK=False:POLICY=Auto'
     }
     It 'honors a relative explicit config without depending on the caller directory' {
         '{"Destination":"E:\\Custom","Sources":[{"Id":"CUSTOM","Path":"C:\\Data"}]}' |
             Set-Content -LiteralPath "$fixture\custom.json" -Encoding UTF8
         $output = & powershell.exe -NoProfile -STA -File "$fixture\Backup.ps1" -Mode Audit -Config custom.json
         $LASTEXITCODE | Should -Be 0
-        ($output -join '') | Should -Be 'PLAN:CUSTOM:Audit:E:\Custom:QUICK=False:POLICY=Exclude'
+        ($output -join '') | Should -Be 'PLAN:CUSTOM:Audit:E:\Custom:QUICK=False:POLICY=Auto'
     }
     It 'exits with code 2 and an actionable path when config is missing' {
         Remove-Item -LiteralPath "$fixture\backup.local.json"
