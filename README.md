@@ -1,5 +1,11 @@
 # Windows Backup
 
+## Primeiro uso: quatro passos
+
+**Quer apenas proteger seus arquivos?** Siga o [guia rápido com instruções simples](docs/GUIA-RAPIDO.md): **1. auditar sem copiar → 2. revisar o relatório → 3. fazer o backup → 4. testar a restauração**. Não é preciso Python nem editar JSON no modo automático.
+
+**O menu informa que `Backup.ps1` não existe?** `Iniciar.cmd` e `Backup.ps1` devem estar na mesma pasta, acompanhados da pasta `src`. Uma instalação incompleta impede a execução. Consulte a seção [Solução de problemas do guia rápido](docs/GUIA-RAPIDO.md#solução-de-problemas). Mensagens de falha não significam backup concluído.
+
 ## Comece pelo menu (Windows)
 
 Se você já clonou o projeto, atualize sem recriar sua configuração:
