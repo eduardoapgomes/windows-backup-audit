@@ -2,7 +2,7 @@
 [CmdletBinding()]
 param(
     [string]$Config,
-    [ValidateSet('Audit','Backup')][string]$Mode = 'Audit',
+    [ValidateSet('Plan','Audit','Backup')][string]$Mode = 'Audit',
     [switch]$SelectDestination,
     [switch]$Setup,
     [switch]$OpenReport,
@@ -22,12 +22,20 @@ try {
     if (-not $AutoDiscover -and -not (Test-Path -LiteralPath $Config -PathType Leaf)) {
         throw "Configuração não encontrada: $Config. Execute Iniciar.cmd e escolha Configurar, ou use -Setup para selecionar suas pastas."
     }
-    Assert-BackupDependencies $Mode
+    if ($Mode -ne 'Plan') { Assert-BackupDependencies $Mode }
     $options = @{}
     if ($AutoDiscover) {
         $plan = Get-AutomaticBackupPlan
         $options = @{Discovery=$plan.Discovery;ExcludedPaths=$plan.ExcludedPaths;Scope='Descoberta automática'}
     } else { $plan = Get-Content -LiteralPath $Config -Raw | ConvertFrom-Json }
+    if ($Mode -eq 'Plan') {
+        Write-Host ''
+        Write-Host 'PLANO RAPIDO (somente metadados de pastas; nenhum hash, copia ou USB necessario):'
+        $plan.Sources | Format-Table Id,Path -AutoSize | Out-Host
+        Write-Host 'IMPORTANTE: o plano nao garante cobertura. Confira pastas fora da lista, arquivos soltos e dados de aplicativos.'
+        Write-Host 'Para acrescentar outras pastas, use a configuracao manual do menu.'
+        exit 0
+    }
     $destination = $null
     if ($plan.PSObject.Properties['Destination']) { $destination = [string]$plan.Destination }
     if ($SelectDestination -or [string]::IsNullOrWhiteSpace($destination)) {

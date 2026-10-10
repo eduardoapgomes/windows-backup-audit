@@ -3,29 +3,35 @@ setlocal
 cd /d "%~dp0"
 :menu
 cls
-echo WINDOWS BACKUP - escolha uma opcao
- echo 1. AUDITORIA AUTOMATICA - descobrir dados e comparar
- echo 2. BACKUP AUTOMATICO - descobrir, copiar e verificar
- echo 3. Configurar pastas manualmente (primeiro uso manual)
- echo 4. Auditoria das pastas da configuracao manual
- echo 5. Backup das pastas da configuracao manual
- echo 6. Abrir documentacao
- echo 7. Editar configuracao manual existente
- echo 8. Mapa visual e agrupamentos (Python; pode acompanhar auditoria)
- echo 0. Sair
-choice /c 123456780 /n /m "Opcao: "
-if errorlevel 9 exit /b 0
+echo BACKUP DE DADOS - escolha uma opcao
+echo.
+echo 1. VER PLANO DE PASTAS (rapido; sem USB e sem hashes)
+echo 2. AUDITAR pastas selecionadas (compara arquivos; precisa de USB)
+echo 3. FAZER BACKUP (copia e verifica; precisa de USB)
+echo 4. Selecionar minhas pastas manualmente
+echo 5. Auditar pastas manuais
+echo 6. Fazer backup das pastas manuais
+echo 7. Abrir guia no GitHub
+echo 8. Mapa visual opcional (Python)
+echo 9. Editar configuracao manual
+echo 0. Sair
+choice /c 1234567890 /n /m "Opcao: "
+if errorlevel 10 exit /b 0
+if errorlevel 9 goto editar
 if errorlevel 8 goto catalogo
-if errorlevel 7 goto editar
-if errorlevel 6 goto docs
-if errorlevel 5 goto manualbackup
-if errorlevel 4 goto manualaudit
-if errorlevel 3 goto setup
-if errorlevel 2 goto backup
+if errorlevel 7 goto docs
+if errorlevel 6 goto manualbackup
+if errorlevel 5 goto manualaudit
+if errorlevel 4 goto setup
+if errorlevel 3 goto backup
+if errorlevel 2 goto audit
+powershell.exe -NoProfile -STA -File "%~dp0Backup.ps1" -Mode Plan -AutoDiscover
+goto resultado
+:audit
 powershell.exe -NoProfile -STA -File "%~dp0Backup.ps1" -Mode Audit -AutoDiscover -SelectDestination -OpenReport
 goto resultado
 :backup
-echo Use a mesma pasta de destino da auditoria automatica revisada.
+echo Revise as pastas do plano e selecione o mesmo destino usado na auditoria.
 powershell.exe -NoProfile -STA -File "%~dp0Backup.ps1" -Mode Backup -AutoDiscover -SelectDestination -OpenReport
 goto resultado
 :setup
@@ -48,7 +54,7 @@ if not exist "%~dp0backup.local.json" goto ausente
 notepad.exe "%~dp0backup.local.json"
 goto menu
 :ausente
-echo Use a opcao 3 para criar sua configuracao manual.
+echo Use a opcao 4 para criar sua configuracao manual.
 pause
 goto menu
 :resultado

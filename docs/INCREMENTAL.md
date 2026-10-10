@@ -4,7 +4,7 @@
 
 | Técnica | Uso real | O que não autoriza |
 |---|---|---|
-| Política top-down | Adia bibliotecas reconhecidas; prioriza dados essenciais | Descartar uma pasta apenas porque seu nome parece irrelevante |
+| Política top-down | Descobre somente raízes de dados em nível superficial; adia bibliotecas reconhecidas e prioriza dados essenciais | Descartar uma pasta apenas porque seu nome parece irrelevante |
 | Índice por tamanho | Enumera o destino sem ler todo o conteúdo; só calcula hashes nos grupos de tamanho solicitados por origens | Ignorar arquivos pequenos ou únicos no backup |
 | SHA-256 em blocos | Verifica origens, cópias e candidatos reutilizados | Tratar metadados ou similaridade como identidade |
 | Merkle persistente | Grava `merkle.json`, checksum e diferenças entre inventários; comparação para na raiz de uma subárvore igual | Pular leitura de uma origem porque o manifesto antigo não mudou |

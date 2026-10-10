@@ -30,6 +30,11 @@ Export-ModuleMember -Function *
         $LASTEXITCODE | Should -Be 0
         ($output -join '') | Should -Be 'PLAN:AUTO:Audit:E:\Chosen'
     }
+    It 'shows the quick plan without choosing a destination or invoking the backup engine' {
+        $output = & powershell.exe -NoProfile -STA -File "$fixture\Backup.ps1" -AutoDiscover -Mode Plan
+        $LASTEXITCODE | Should -Be 0
+        ($output -join '') | Should -Not -Match 'PLAN:AUTO:Plan:'
+    }
     It 'routes setup to the script-local configuration without starting a backup' {
         $output = & powershell.exe -NoProfile -STA -File "$fixture\Backup.ps1" -Setup
         $LASTEXITCODE | Should -Be 0
