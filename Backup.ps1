@@ -2,7 +2,7 @@
 [CmdletBinding()]
 param(
     [string]$Config,
-    [ValidateSet('Plan','Audit','Backup')][string]$Mode = 'Plan',
+    [ValidateSet('Plan','Audit','Backup')][string]$Mode = 'Audit',
     [switch]$SelectDestination,
     [switch]$Setup,
     [switch]$OpenReport,
