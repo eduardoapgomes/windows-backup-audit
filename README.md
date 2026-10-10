@@ -1,254 +1,89 @@
-# Windows Backup
+# Windows Backup Audit
 
-## Comece pelo menu (Windows)
+**Backup de informação pessoal no Windows, com auditoria antes da cópia e verificação SHA-256.** A prioridade é proteger documentos, fotos, vídeos e projetos, **não copiar a instalação do Windows**.
 
-Se você já clonou o projeto, atualize sem recriar sua configuração:
+> **Importante:** o modo automático é **focado**, não uma busca exaustiva de todos os discos. Pastas fora do escopo precisam ser incluídas manualmente. Não formate o computador apenas porque um relatório não mostra erros.
 
-```powershell
-cd "$env:USERPROFILE\Projetos\windows-backup-audit"
-git pull --ff-only
-if ($LASTEXITCODE -ne 0) { throw "A atualização falhou; confira a mensagem acima." }
-.\Iniciar.cmd
-```
+## Comece em 4 passos
 
-Também pode dar dois cliques em **Iniciar.cmd**. Escolha **1 — Auditoria automática** para descobrir dados sem editar JSON. Depois de revisar o relatório, use **2 — Backup automático**. As opções **3, 4 e 5** configuram e executam o modo manual; **6** abre a documentação e **7** edita a configuração manual. A opção **8** abre o mapa visual e acompanha um inventário, inclusive durante outra execução (requer Python 3.9+). Sua configuração existente é preservada; o modo automático não a utiliza nem a sobrescreve.
+1. No Windows 10/11, conecte um **HD/SSD USB externo NTFS**. Baixe o projeto em **Code → Download ZIP** e extraia **a pasta inteira** (ou clone com Git).
+2. Abra **Iniciar.cmd**, opção **1 — Auditoria automática**. Selecione o destino externo. **Não copia arquivos de origem.**
+3. Abra o **LEIA-ME.html** gerado, confira as pastas **INCLUDED**, os avisos **REVIEW**, arquivos **NEEDS_COPY** e erros. Adicione pastas importantes que ficaram de fora usando a opção **3**.
+4. Só depois use a opção **2 — Backup automático**, no **mesmo destino**. Confira o novo relatório e **teste restaurar alguns arquivos**.
 
-Na seleção de destino, escolha o HD USB e depois a pasta onde estão os backups manuais/parciais. Para começar um backup novo, escolha a raiz do HD: o programa cria sua pasta própria. A auditoria grava relatórios no HD, mas não copia seus arquivos. Arquivos iguais são comparados por SHA-256 e reutilizados dentro da pasta selecionada.
+[Guia rápido e solução de problemas](docs/GUIA-RAPIDO.md).
 
-### O que a varredura automática cobre
+### O que o modo automático examina
 
-O modo automático varre os volumes internos com letra, **inclusive C:\ e Users**, procurando dados fora e dentro do perfil. Reconhece pastas pessoais redirecionadas e OneDrive. Raízes sobrepostas são consolidadas. A pasta de configuração manual não limita essa varredura.
+- Pastas conhecidas do usuário atual: Documentos, Área de Trabalho, Downloads, Imagens, Música, Vídeos, Favoritos e OneDrive quando disponível.
+- Pastas de dados/projetos com nomes reconhecidos, como **Projetos, Projects, Code, Repos, Dados, Data, Trabalho, Work, Estudos, Notebooks**, no perfil e no topo dos volumes internos.
+- **Não percorre** automaticamente a raiz de `C:\`, `C:\Users`, `AppData`, `Program Files`, `Windows`, caches ou todas as pastas de software. Outros nomes e arquivos soltos nas raízes dos discos são sinalizados para **REVIEW**, não declarados protegidos.
 
-Os tipos internos habilitados são SATA, ATA, NVMe, SAS, SCSI e RAID; volumes offline e mídias USB não são origens automáticas. O HD USB continua sendo selecionado como destino e nunca pode estar no mesmo disco físico das origens.
+Uma pasta com nome incomum pode conter dados importantes: **inclua-a pelo modo manual**. O modo automático não substitui essa revisão.
 
-Exclusões explícitas na raiz de cada volume: Windows, Program Files, Program Files (x86), Boot, EFI, Recovery, Config.Msi, $RECYCLE.BIN, System Volume Information e arquivos de paginação/hibernação/boot. Os principais arquivos NTUSER do perfil atual também são excluídos. **Users, AppData e ProgramData não são descartados em bloco.** Perfis protegidos podem gerar erros de acesso, que são registrados sem interromper as demais pastas. Não alteramos permissões.
+### Como a auditoria ficou mais rápida
 
-**Anaconda:** .conda, .jupyter, .ipython, notebooks, scripts e pastas próprias dentro de Users permanecem na varredura. Instalações Anaconda/Miniconda dentro do perfil são examinadas preservando trabalhos e metadados; o componente Lib\site-packages reconhecido é tratado como biblioteca opcional pela política Auto. Isso não garante reinstalação idêntica do ambiente. Instalações dentro de Program Files seguem a exclusão de software: se você salvou trabalhos ali, inclua essa pasta em uma execução manual. A cópia de um ambiente não garante que ele será executável após reinstalar; preserve também environment.yml/requirements.txt ou exporte o ambiente pelo próprio Conda.
+1. **Top-down:** seleciona as raízes úteis antes de enumerar arquivos. Bibliotecas Node/Python reconhecidas e caches gerados são ignorados no padrão automático `Exclude`; projetos, notebooks, arquivos de código próprio e manifests continuam elegíveis.
+2. **Metadados primeiro:** na auditoria automática, se não existe arquivo de mesmo tamanho no backup, registra `NEEDS_COPY` **sem ler o arquivo inteiro para SHA-256**. Havendo candidatos de mesmo tamanho, usa SHA-256 para confirmar igualdade. Use `-FullAudit` se quiser hash de todos os arquivos da auditoria.
+3. **Backup sem atalhos:** o modo Backup continua calculando SHA-256 e verificando cada cópia/reutilização antes de confirmá-la. Nenhum arquivo é excluído ou movido por similaridade.
 
-A descoberta não cobre rede nem volumes sem letra e não produz uma imagem do sistema. Revise a lista de exclusões: arquivos pessoais armazenados dentro de diretórios excluídos exigem uma execução manual específica.
+**Merkle** compara hierarquicamente os inventários observados; **MinHash/LSH** sugere relações entre pastas no mapa opcional (opção 8, Python 3.9+). Nenhum deles é usado para pular a verificação de um backup. [Detalhes técnicos](docs/INCREMENTAL.md).
 
-O relatório registra raízes incluídas, exclusões e falhas de descoberta em **cobertura.csv**, o plano em **plano.json** e falhas de enumeração em **falhas-enumeracao.csv**. Um link ou pasta inacessível não impede examinar as demais pastas: a falha fica registrada e a execução termina como incompleta. Não alteramos permissões e não seguimos junctions.
+## Entenda os resultados
 
-### Progresso visível e relatório
-
-O console informa descoberta, enumeração, indexação, cálculo SHA-256, arquivo atual, tempo decorrido e quantidade de leituras concluídas. Arquivos grandes são lidos em blocos com progresso de bytes; Robocopy mostra sua saída durante a cópia. A porcentagem se refere ao arquivo atual, não a uma estimativa do total ainda desconhecido. Leituras incluem verificações e revalidações, portanto podem superar o número de arquivos únicos. Em chamadas de sistema bloqueadas pelo disco/provedor, a atualização pode parar até o Windows responder.
-
-O **ANDAMENTO.html** abre no início e atualiza a cada 10 segundos. Seus dados são gravados aproximadamente a cada 5 segundos enquanto a execução avança, inclusive durante o hash de arquivos grandes. O inventário CSV é incremental. Ao concluir, a página encaminha ao relatório final, inclusive quando há erros. Verifique o horário da última atualização: uma interrupção não vira sucesso.
-
-O **LEIA-ME.html** agora tem tabelas reais, totais, maiores arquivos, categorias de documentos/Python/Jupyter, pendências e cobertura. Não depende de Pandoc. Zero erros só significa que não houve falha registrada dentro do escopo; não prova cobertura de todo o computador.
-
-**Auditoria automática:**
-
-```powershell
-powershell.exe -NoProfile -STA -File .\Backup.ps1 -Mode Audit -AutoDiscover -SelectDestination -OpenReport
-```
-
-**Backup automático, após revisar a auditoria:**
-
-```powershell
-powershell.exe -NoProfile -STA -File .\Backup.ps1 -Mode Backup -AutoDiscover -SelectDestination -OpenReport
-```
-
-O backup redescobre o escopo no momento da execução. Confira seu novo plano/relatório, pois pastas e volumes podem ter mudado desde a auditoria. Escolha a mesma pasta de destino para reutilizar as cópias existentes.
-
-### Bibliotecas opcionais e decisões por pasta
-
-Agora o padrão é **Auto**: a auditoria identifica bibliotecas Node/Python com marcadores e não entra em todos os arquivos dessas pastas. Elas aparecem em `dependencias.csv` como adiadas, sem tamanho inventado. O índice inicial do destino também adia bibliotecas reconhecidas; consulte `indice-excluido.csv`. Documentos, código próprio, notebooks, manifests/lockfiles e metadados de ambiente continuam no fluxo essencial.
-
-No Backup, bibliotecas reconhecidas são consideradas **depois** dos dados essenciais, se não houver erros anteriores e houver espaço para o tamanho lógico da pasta mais 256 MiB. A verificação por conteúdo e as proteções do HD continuam valendo. Falta de espaço deixa a biblioteca opcional sem cópia, registrada como tal; nunca é contada como protegida. Não compactamos automaticamente nesta versão.
-
-Para excluir bibliotecas também do backup, use `-DependencyPolicy Exclude`. Para voltar ao exame completo, use `-DependencyPolicy Include`. Pastas inteiras chamadas venv/anaconda não são descartadas: somente os componentes de bibliotecas reconhecidos. Se você modificou código dentro de node_modules/site-packages ou depende de pacotes privados indisponíveis, use Include.
-
-[Veja as regras, limites e o experimento de análise hierárquica](docs/HIERARCHY.md). Ele usa Jaccard e, opcionalmente, NCD sobre manifests de caminhos, sem mover arquivos nem decidir o que descartar. Não é agrupamento por assunto validado.
-
-### OneDrive
-
-Pastas e arquivos com marcadores Cloud Files são aceitos **somente como origem**. Junctions, links e outros tipos de redirecionamento continuam bloqueados, mesmo dentro de uma pasta chamada OneDrive. O destino continua exigindo USB/NTFS, fora do disco de origem e sem reparse points.
-
-Se aparecer **“Arquivo em nuvem não disponível localmente”**, no Explorador clique com o botão direito na pasta do OneDrive, escolha **Sempre manter neste dispositivo** e aguarde a conclusão do download. Isso usa espaço no disco de origem. Depois execute a auditoria novamente. O programa verifica atributos antes de ler e registra arquivos indisponíveis como erro; não baixa conteúdo deliberadamente nem considera esses arquivos protegidos pelo backup. Um provedor concorrente pode alterar o estado entre a verificação e a leitura; veja `docs/SAFETY.md`.
-
-### Comandos do modo manual (sem menu)
-
-Configuração inicial por janelas, somente se ainda não tiver `backup.local.json`:
-
-```powershell
-powershell.exe -NoProfile -STA -File .\Backup.ps1 -Setup
-```
-
-**Auditoria — comparar e gerar relatório:**
-
-```powershell
-powershell.exe -NoProfile -STA -File .\Backup.ps1 -Mode Audit -SelectDestination -OpenReport
-```
-
-**Backup — copiar e verificar, após revisar a auditoria:**
-
-```powershell
-powershell.exe -NoProfile -STA -File .\Backup.ps1 -Mode Backup -SelectDestination -OpenReport
-```
-
-A página de acompanhamento abre no início; quando a execução termina, encaminha ao relatório final. Se houver erros, a mensagem indica a pasta `_RELATORIOS` no HD; abra seu `LEIA-ME.html`. Não reinstale nem formate o Windows com pendências. Não é necessário instalar Pandoc. O menu usa Windows PowerShell Desktop, Windows Forms e Out-GridView; a leitura de tags usa APIs nativas do Windows por `Add-Type` (ambientes com linguagem restrita podem bloquear, sem liberar o destino).
-
-
-Projeto pré-formatação baseado na pesquisa **Backup Windows com PowerShell: inventário profundo, deduplicação, segurança e verificação pré-formatação**, de 07/10/2026.
-
-## Guia para quem está começando
-
-### 1. Dependências
-
-Windows 10/11, Windows PowerShell Desktop 5.1 e módulo Storage (Get-Disk/Get-Partition/Get-Volume). A interface usa Out-GridView e Windows Forms. O destino precisa ser um USB externo NTFS. O Robocopy acompanha o Windows e é necessário para copiar; o código verifica sua presença antes do modo Backup. O modo Audit não precisa dele.
-
-Git é necessário apenas para clonar e atualizar o projeto. Baixe o instalador em https://git-scm.com/download/win e abra uma nova janela do PowerShell depois da instalação. Pandoc e Node.js não são necessários. Python não é necessário para o backup; o painel contextual opcional requer Python 3.9+ e usa somente a biblioteca padrão. Pester 5.7.1 é dependência apenas dos testes de desenvolvimento.
-
-### 2. Clonar o repositório
-
-Abra o menu Iniciar, procure **Windows PowerShell** e abra normalmente. Cole este bloco uma vez. Ele cria uma pasta Projetos no seu perfil e baixa o código público para ela:
-
-```powershell
-New-Item -ItemType Directory -Path "$env:USERPROFILE\Projetos" -Force | Out-Null
-cd "$env:USERPROFILE\Projetos"
-git clone https://github.com/eduardoapgomes/windows-backup-audit.git
-cd .\windows-backup-audit
-```
-
-Se a pasta já existe porque você clonou antes, use este bloco para atualizar, preservando sua configuração local:
-
-```powershell
-cd "$env:USERPROFILE\Projetos\windows-backup-audit"
-git pull --ff-only
-```
-
-Alternativa sem Git: no repositório, clique **Code → Download ZIP**, extraia o ZIP e abra o PowerShell na pasta que contém Backup.ps1.
-
-### 3. Configurar as pastas
-
-Conecte o disco de backup. Execute este bloco apenas na primeira configuração; depois edite backup.local.json diretamente para não sobrescrever suas escolhas:
-
-```powershell
-cd "$env:USERPROFILE\Projetos\windows-backup-audit"
-Copy-Item .\backup.example.json .\backup.local.json
-notepad .\backup.local.json
-```
-
-Deixe **Destination** vazio (`""`) para abrir a seleção de disco e pasta. Também pode informar uma pasta externa explicitamente; as mesmas validações são obrigatórias em ambos os casos. Em **Sources**, informe as pastas que quer examinar/copiar. Cada **Id** deve ser único. Exemplo JSON (substitua USUARIO; barras invertidas em JSON são duplicadas):
-
-```json
-{
-  "Destination": "",
-  "Sources": [
-    {"Id": "01_DOCUMENTOS", "Path": "C:\\Users\\USUARIO\\Documents"},
-    {"Id": "02_DOWNLOADS", "Path": "C:\\Users\\USUARIO\\Downloads"}
-  ]
-}
-```
-
-Inclua outras pastas necessárias. Para saber o caminho real de uma pasta, abra-a no Explorador e copie a barra de endereço. Documentos/Área de Trabalho podem estar dentro do OneDrive. Selecione pastas reais em vez do perfil inteiro, que pode conter junctions. O destino deve ficar fora de todas as origens.
-
-### 4. Fazer somente a auditoria
-
-Este bloco abre a seleção de mídia, compara conteúdo e gera relatório; **não copia seus arquivos**. Na segunda janela, escolha a pasta que já contém seu backup manual. Para um backup novo, selecione a raiz do USB e o programa usará BACKUP_WINDOWS\COMPUTADOR-USUARIO:
-
-```powershell
-cd "$env:USERPROFILE\Projetos\windows-backup-audit"
-powershell.exe -NoProfile -STA -File .\Backup.ps1 -Mode Audit -SelectDestination
-```
-
-O console informa a pasta do relatório. Vá até ela e dê dois cliques em **LEIA-ME.html** para ler no navegador, sem instalar nada. Também há LEIA-ME.md, inventario.csv e resumo.json. Se houve erro, haverá erros.txt ou mensagens na coluna Error.
-
-O relatório lista as origens, quantidade, tamanho lógico, status, erros e passos de revisão. Abra inventario.csv no Excel para verificar os arquivos. **NEEDS_COPY significa que ainda falta copiar. SKIP_IDENTICAL e REUSED_EXISTING indicam uma cópia encontrada e comparada por SHA-256.** Pastas não configuradas não foram examinadas. Uma pasta com erro pode ter sido examinada apenas parcialmente.
-
-Revise origens, arquivos esperados e erros antes de passar ao próximo bloco. Consulte [cobertura](docs/COVERAGE.md) para aplicativos e dados especiais.
-
-### 5. Fazer o backup de fato
-
-Execute separadamente, depois de revisar a auditoria, escolhendo o mesmo disco e pasta:
-
-```powershell
-cd "$env:USERPROFILE\Projetos\windows-backup-audit"
-powershell.exe -NoProfile -STA -File .\Backup.ps1 -Mode Backup -SelectDestination
-```
-
-Leia o **novo** LEIA-ME.html. VERIFIED significa cópia conferida por SHA-256; SKIP_IDENTICAL significa que o destino já tinha o conteúdo; REUSED_EXISTING indica uma cópia igual em outro caminho e ERROR exige correção. Em reexecuções, arquivos idênticos não são recopiados.
-
-Se o PowerShell bloquear scripts, consulte a política do computador; não desative proteções globalmente. Em computador pessoal, você pode usar RemoteSigned apenas nesta janela, se permitido:
-
-```powershell
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned
-```
-
-Depois repita o bloco de auditoria ou backup escolhido. Políticas de organização podem impedir essa alteração. O primeiro comando executável de Backup.ps1 é cd $PSScriptRoot.
-
-## Comportamento
-
-| Operação | Resultado |
+| Status | Significado |
 |---|---|
-| Audit | Compara SHA-256 com cópias existentes; gera relatórios no USB |
-| Backup | Hash, cópia em staging, verificação e instalação |
-| Reexecução | Mesmo conteúdo no mesmo destino: SKIP_IDENTICAL |
-| Conteúdo alterado | Preserva versão anterior em `.history-*` ao lado do arquivo |
-| Erro de leitura/cópia | Registra erro, resumo e retorno 2 |
-| Raízes sobrepostas | Processa cada caminho de origem uma vez; primeira raiz prevalece |
-| Arquivos iguais em locais diferentes | Reutiliza conteúdo; Source → Destination no CSV preserva o mapeamento |
-| Junction/symlink/placeholder | Interrompe essa raiz e exige revisão explícita |
+| `NEEDS_COPY` | Precisa copiar. **Não é backup concluído.** Na auditoria rápida, o SHA pode estar vazio. |
+| `VERIFIED` | Arquivo copiado e conferido no modo Backup. |
+| `SKIP_IDENTICAL` | Cópia idêntica encontrada no destino esperado, conferida. |
+| `REUSED_EXISTING` | Conteúdo igual encontrado em outro caminho do destino, conferido. |
+| `ERROR` | Falha que exige revisão. |
+| `REVIEW` (em `cobertura.csv`) | Local **fora do escopo automático**, não auditado. |
+| `PARCIAL` | Execução interrompida ou ainda em andamento. **Não prova cobertura nem conclusão.** |
 
-Os relatórios ficam em `DESTINO\_RELATORIOS\ID_EXECUCAO`. Abra `LEIA-ME.html` para revisão guiada, `LEIA-ME.md`, `resumo.json`, `inventario.csv` e, se existir, `erros.txt`. O destino tem um lock exclusivo para impedir execuções simultâneas. Não há `/MIR`, `/PURGE`, exclusão da origem nem envio automático a IA.
+Relatórios: `DESTINO\_RELATORIOS\ID\LEIA-ME.html`, `inventario.csv`, `cobertura.csv`, `resumo.json` e, quando aplicável, `dependencias.csv`, `merkle.json`, `metricas.json`. **Não publique relatórios com caminhos pessoais.**
 
-No modo manual, configure as raízes explicitamente. Uma raiz de disco como `D:\` pode ser auditada, mas diretórios protegidos/reparse geram erros. Um perfil completo pode conter junctions: nesses casos selecione separadamente as pastas reais. `Audit -AutoDiscover` descobre volumes internos e pastas pessoais; sem essa opção, vale somente a configuração manual. Aplicativos ainda podem exigir exportações próprias. Veja [cobertura](docs/COVERAGE.md).
+## Seleção manual ou uso avançado
 
-## Testes
+No menu, **3** configura pastas, **4** audita a seleção e **5** faz o backup dela. É a melhor opção para pastas com nomes incomuns, dados de aplicativos, outras unidades ou um escopo exato. A configuração fica em `backup.local.json` e não deve ser enviada ao GitHub.
+
+Comandos opcionais:
 
 ```powershell
-cd "$env:USERPROFILE\Projetos\windows-backup-audit"
+# Auditoria automática focada e rápida
+powershell.exe -NoProfile -STA -File .\Backup.ps1 -Mode Audit -AutoDiscover -SelectDestination -OpenReport
+
+# Auditoria automática com hash de todos os arquivos selecionados
+powershell.exe -NoProfile -STA -File .\Backup.ps1 -Mode Audit -AutoDiscover -FullAudit -SelectDestination
+
+# Backup automático (hash e verificação obrigatórios)
+powershell.exe -NoProfile -STA -File .\Backup.ps1 -Mode Backup -AutoDiscover -SelectDestination -OpenReport
+
+# Inspecionar também bibliotecas regeneráveis, conscientemente
+powershell.exe -NoProfile -STA -File .\Backup.ps1 -Mode Audit -AutoDiscover -FullAudit -DependencyPolicy Include -SelectDestination
+```
+
+O destino precisa ser USB/NTFS, fora das origens e em disco físico diferente. Não existe opção de desativar essa proteção. Para arquivos de nuvem, mantenha o conteúdo disponível localmente. Feche aplicativos que estejam escrevendo arquivos; bancos, WSL, máquinas virtuais e perfis de programas exigem exportações próprias.
+
+## Falta energia, ou o menu diz que terminou?
+
+Se a energia acabou, **não confie no relatório parcial como backup concluído**. Confira o destino e execute novamente depois de revisar as pastas: arquivos existentes só são reutilizados quando a comparação de conteúdo confirma igualdade. Não apague arquivos `.history-*` nem pastas de staging manualmente sem análise.
+
+Se o menu informar que `Backup.ps1` não existe, confirme que `Iniciar.cmd`, `Backup.ps1` e a pasta `src` estão na mesma instalação; extraia o ZIP completo. Uma mensagem de falha **não é sucesso**.
+
+## Limites, segurança e testes
+
+Este projeto **não é imagem do Windows, snapshot VSS nem sistema completo de restauração**. Ele não assegura consistência de bancos abertos, permissões/ACLs, certificados, EFS ou dados que ficaram fora das pastas selecionadas. Antes de formatar: revisar cobertura, resolver erros, manter segunda cópia e testar restauração.
+
+- [Guia rápido](docs/GUIA-RAPIDO.md) · [Cobertura e aplicativos especiais](docs/COVERAGE.md) · [Segurança, interrupções e retomada](docs/SAFETY.md)
+- [Merkle, MinHash e custos](docs/INCREMENTAL.md) · [Mapa visual opcional](docs/ORGANIZATION.md) · [Validação e testes](docs/VALIDATION.md)
+- [Pesquisa de agrupamentos](docs/HIERARCHY.md) · [Publicação segura](docs/GITHUB.md)
+
+Testes de desenvolvimento (Windows PowerShell 5.1, Pester 5.7.1):
+
+```powershell
 Install-Module Pester -RequiredVersion 5.7.1 -Scope CurrentUser -Force
 Invoke-Pester .\tests -Output Detailed
 ```
 
-Há integração com Robocopy real para reexecução idempotente, alteração de conteúdo com tamanho e timestamp iguais e retenção anterior, além de validação de caminhos e modo auditoria. CI em `.github/workflows/tests.yml`. Consulte [validação](docs/VALIDATION.md) antes de uso real.
-
-## Seleção segura e backup parcial
-
-A interface só lista destinos USB/NTFS identificáveis, graváveis, sem boot/sistema e em disco físico diferente de todas as origens. SATA/NVMe internos, redes, volumes virtuais/ambíguos e outros formatos são bloqueados. Não há opção de ignorar essa regra nem formatação automática. Se o módulo Storage não conseguir confirmar a mídia, a execução para; confira acesso/permissões sem mudar o disco às cegas.
-
-A varredura de cópias manuais cobre **a pasta escolhida e suas subpastas**, não todo o HD. Escolha uma pasta que englobe o backup parcial. O programa compara tamanho + SHA-256, mesmo com nome diferente. Não apaga duplicatas que já existiam. Falha ao indexar o destino impede o início da cópia.
-
-Para conteúdo reutilizado, **Destination no inventario.csv aponta para o arquivo real**. PlannedDestination é o caminho que seria criado. Guarde os relatórios junto do backup e não mova/apague arquivos reutilizados. Um único arquivo pode atender várias origens; por isso a árvore do destino não necessariamente reproduz todas as árvores de origem. A auditoria pode ser demorada porque lê o conteúdo, inclusive de backups manuais.
-
-Mais detalhes e limites: [segurança e retomada](docs/SAFETY.md).
-
-## Restauração
-
-Use a coluna Destination do inventário para localizar a cópia real, inclusive REUSED_EXISTING. Source e RootId/RelativePath indicam a origem lógica. Para recuperar vários caminhos com conteúdo igual, copie a mesma cópia para cada caminho em uma pasta de restauração vazia. Copie uma amostra do destino para uma pasta vazia fora das origens, compare SHA-256 com o inventário e abra os arquivos no aplicativo original. Inclua documento, fotografia e projeto. Para recuperar versão anterior, examine `.history-*`; os nomes são únicos e não indicam sozinhos o arquivo original, portanto mantenha o contexto da pasta e confira conteúdo/hash. Não existe comando automático de restauração nem índice de versões nesta versão.
-
-## Limites
-
-Não é imagem de sistema, snapshot VSS nem backup transacional. Feche aplicativos e faça exports nativos de bancos/WSL/Docker/VMs. Não garante ACLs, alternate data streams, EFS, certificados privados ou recuperação de sessões de navegador. Verificação de hash não comprova consistência de banco nem ausência de malware. Caminhos longos, arquivos bloqueados e pouco espaço podem falhar e devem ser testados na mídia real. O programa bloqueia redirecionamentos nos caminhos, verifica o disco físico e revalida sua identidade antes das gravações. Ainda exige um computador e uma mídia confiáveis; alterações concorrentes maliciosas não estão cobertas por uma garantia absoluta. `File.Replace` precisa de suporte do filesystem; em caso de falha preserva o destino anterior e registra erro.
-
-O script não determina se é seguro formatar. Antes disso: cobertura revisada, nenhum erro pendente, exports especiais testados, segunda cópia independente e teste real de restauração. Criptografe mídia com dados sensíveis e mantenha recovery keys em outro local.
-
-## Publicação
-
-O repositório público deve conter somente código, testes e documentação. Nunca envie `backup.local.json`, relatórios, dados, chaves ou exports. O `.gitignore` é uma barreira auxiliar, não um scanner de segredos. Veja [publicação](docs/GITHUB.md).
-
-## Organização
-
-`src/Backup.Core.psm1`: funções de caminhos, enumeração, hash, transporte e coordenação. `Backup.ps1`: CLI/configuração. `tests`: contratos e integração. `reference/Research-Backup.ps1.txt`: implementação extensa da pesquisa, preservada para referência, com correção de expansão de `$RECYCLE` e transporte forçado após decisão de hash; referência textual não executável, não usada pelo motor modular.
-
-O projeto adapta recomendações da pesquisa; não apresenta o script extenso como produção testada. Licença MIT; consulte LICENSE.
-
-
-## Mapa visual e organização por contexto
-
-Após atualizar, abra `Iniciar.cmd` e escolha **8**. Selecione o `inventario.csv` dentro da pasta de relatórios da execução. Você pode abrir outro `Iniciar.cmd` enquanto a auditoria ou o backup trabalha: o painel acompanha alterações a cada 30 segundos, sem reler os arquivos originais.
-
-O painel tem navegação pelas pastas, barras de tamanho e cobertura, busca paginada com o caminho da cópia e um diagrama de relações candidatas. Arquivos diretamente em Downloads/Área de Trabalho são relacionados a projetos por nomes e hashes já observados. Casos ambíguos e sem evidência ficam explícitos. **Nenhum agrupamento muda caminhos, dispensa cópia ou apaga arquivos.** A organização é um catálogo adicional; a restauração continua baseada no inventário.
-
-O painel é salvo em uma pasta temporária local exclusiva, cujo caminho aparece no terminal. Para mantê-lo, copie a pasta inteira para um local de sua escolha. Ele contém caminhos pessoais: não publique no GitHub. Consulte [instalação, uso e limites da organização](docs/ORGANIZATION.md).
-
-
-## Incremental: índice por tamanho, Merkle e MinHash
-
-O destino agora é indexado inicialmente por tamanho, sem hash de todo o conteúdo. Apenas classes solicitadas por arquivos de origem são lidas; uma cópia reutilizada continua sendo revalidada. Arquivos pequenos e únicos também são copiados e verificados.
-
-Cada execução gera `merkle.json`, `merkle.sha256`, `metricas.json` e, havendo manifesto anterior, `merkle-delta.csv`. O painel da opção 8 acrescenta relações entre pastas com MinHash/LSH e Jaccard. [Veja o funcionamento e as limitações](docs/INCREMENTAL.md).
-
-**Merkle compara inventários observados; não dispensa releitura das origens com base em datas/tamanhos. MinHash sugere relações; não decide exclusões.**
+Licença MIT. O código não formata discos, não usa Robocopy /MIR ou /PURGE e não remove arquivos de origem.

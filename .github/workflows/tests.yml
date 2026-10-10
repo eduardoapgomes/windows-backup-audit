@@ -1,5 +1,9 @@
 name: Windows tests
 on: [push, pull_request, workflow_dispatch]
+# Evita gastar runners com commits intermediários da mesma branch.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   test:
     runs-on: windows-latest

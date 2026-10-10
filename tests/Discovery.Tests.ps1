@@ -1,50 +1,89 @@
-﻿BeforeAll { Import-Module "$PSScriptRoot/../src/Backup.Core.psm1" -Force }
-Describe 'Automatic discovery policy' {
+BeforeAll { Import-Module "$PSScriptRoot/../src/Backup.Core.psm1" -Force }
+Describe 'Focused automatic discovery' {
     BeforeEach {
         Mock Get-PersonalFolderCandidates -ModuleName Backup.Core {
-            @([pscustomobject]@{Path='C:\People\User';Kind='Profile'},
-              [pscustomobject]@{Path='C:\People\User\Documents';Kind='Documents'},
+            @([pscustomobject]@{Path='C:\People\User\Documents';Kind='Documents'},
               [pscustomobject]@{Path='F:\Redirected';Kind='Redirected'})
         }
         Mock Get-Volume -ModuleName Backup.Core { @(@{DriveLetter='C'},@{DriveLetter='D'},@{DriveLetter='E'}) }
         Mock Get-StorageIdentity -ModuleName Backup.Core {
-            @{BusType=$(if ($Path -like 'D:*') {'USB'} else {'NVMe'});IsBoot=($Path -like 'C:*');IsSystem=($Path -like 'C:*');IsOffline=$false}
+            @{BusType=$(if ($Path -like 'D:*') {'USB'} else {'NVMe'});IsOffline=$false}
         }
         Mock Assert-PlainPath -ModuleName Backup.Core {}
-        Mock Test-Path -ModuleName Backup.Core { $true }
+        Mock Test-Path -ModuleName Backup.Core {
+            $LiteralPath -in @('C:\People\User\Documents','F:\Redirected','C:\Dados','E:\Projetos')
+        }
     }
-    It 'scans system and data volumes including Users, while excluding software paths and USB' {
+    It 'selects personal and data folders, never whole disks or the Users tree' {
         $plan=Get-AutomaticBackupPlan
-        @($plan.Sources).Count | Should -Be 3
-        $plan.Sources.Path | Should -Contain 'E:\'
+        @($plan.Sources).Count | Should -Be 4
+        $plan.Sources.Path | Should -Contain 'C:\Dados'
+        $plan.Sources.Path | Should -Contain 'E:\Projetos'
         $plan.Sources.Path | Should -Contain 'F:\Redirected'
-        $plan.Sources.Path | Should -Contain 'C:\'
+        $plan.Sources.Path | Should -Contain 'C:\People\User\Documents'
+        $plan.Sources.Path | Should -Not -Contain 'C:\'
+        $plan.Sources.Path | Should -Not -Contain 'E:\'
+        $plan.Sources.Path | Should -Not -Contain 'C:\Users'
         $plan.Sources.Path | Should -Not -Contain 'D:\'
-        $plan.Sources.Path | Should -Not -Contain 'C:\People\User\Documents'
-        @($plan.Discovery | Where-Object Status -eq COVERED).Count | Should -Be 2
-        $plan.ExcludedPaths | Should -Contain 'E:\System Volume Information'
-        $plan.ExcludedPaths | Should -Contain 'C:\Windows'
-        $plan.ExcludedPaths | Should -Not -Contain 'C:\Users'
-        $plan.ExcludedPaths | Should -Not -Contain 'C:\ProgramData'
+        @($plan.Discovery | Where-Object Status -eq REVIEW).Path | Should -Contain 'C:\'
+        @($plan.Discovery | Where-Object Status -eq REVIEW).Path | Should -Contain 'E:\'
+        @($plan.Discovery | Where-Object Status -eq EXCLUDED).Path | Should -Contain 'D:\'
+        @($plan.ExcludedPaths).Count | Should -Be 0
     }
     It 'keeps source identifiers stable across discovery order changes' {
         $first=Get-AutomaticBackupPlan
         $second=Get-AutomaticBackupPlan
         ($first.Sources.Id -join ',') | Should -Be ($second.Sources.Id -join ',')
     }
-    It 'records missing roots instead of silently claiming complete discovery' {
+    It 'records absent optional folders without claiming coverage' {
         Mock Test-Path -ModuleName Backup.Core { $false } -ParameterFilter { $LiteralPath -eq 'F:\Redirected' }
         $plan=Get-AutomaticBackupPlan
-        @($plan.Discovery | Where-Object Status -eq ERROR).Count | Should -Be 1
+        @($plan.Discovery | Where-Object Status -eq NOT_FOUND).Path | Should -Contain 'F:\Redirected'
         $plan.Sources.Path | Should -Not -Contain 'F:\Redirected'
     }
-    It 'records a disk metadata failure and does not guess its source eligibility' {
+    It 'records disk identity failures instead of guessing eligibility' {
         Mock Get-StorageIdentity -ModuleName Backup.Core { throw 'unknown disk' } -ParameterFilter { $Path -like 'E:*' }
         $plan=Get-AutomaticBackupPlan
-        $plan.Sources.Path | Should -Not -Contain 'E:\'
+        $plan.Sources.Path | Should -Not -Contain 'E:\Projetos'
         @($plan.Discovery | Where-Object Status -eq ERROR).Count | Should -Be 1
     }
+    It 'fails closed when no data folder is found' {
+        Mock Get-PersonalFolderCandidates -ModuleName Backup.Core { @() }
+        Mock Test-Path -ModuleName Backup.Core { $false }
+        { Get-AutomaticBackupPlan } | Should -Throw '*Nenhuma pasta de dados*'
+    }
 }
+
+Describe 'Fast audit for new files' {
+    It 'does not hash unmatched new source files and marks the Merkle observation unverified' {
+        Mock Assert-ExternalDestination -ModuleName Backup.Core { @{DiskId='test';VolumeId='test';FreeBytes=100GB;Drive='Z:\'} }
+        $source=New-Item -ItemType Directory (Join-Path $TestDrive 'quick-source')
+        $dest=New-Item -ItemType Directory (Join-Path $TestDrive 'quick-dest')
+        $file=Join-Path $source.FullName 'new.txt'
+        [IO.File]::WriteAllText($file,'important new data')
+        Mock Get-BackupHash -ModuleName Backup.Core { throw 'new source should not be hashed in quick audit' } -ParameterFilter { $Path -eq $file }
+        $run=Invoke-BackupPlan @(@{Id='docs';Path=$source.FullName}) $dest.FullName Audit -QuickAudit -DependencyPolicy Exclude
+        $row=Import-Csv (Join-Path $run 'inventario.csv')
+        $row.Status | Should -Be NEEDS_COPY
+        $row.SHA256 | Should -BeNullOrEmpty
+        (Get-Content (Join-Path $run 'merkle.json') -Raw | ConvertFrom-Json).ObservedHashesComplete | Should -BeFalse
+        (Get-Content (Join-Path $run 'metricas.json') -Raw | ConvertFrom-Json).QuickAuditUnhashed | Should -Be 1
+        (Get-Content (Join-Path $run 'LEIA-ME.md') -Raw) | Should -Match 'Auditoria rápida'
+        (Get-Content (Join-Path $run 'LEIA-ME.html') -Raw) | Should -Match 'Auditoria rápida'
+    }
+    It 'still hashes and matches existing same-size content' {
+        Mock Assert-ExternalDestination -ModuleName Backup.Core { @{DiskId='test';VolumeId='test';FreeBytes=100GB;Drive='Z:\'} }
+        $source=New-Item -ItemType Directory (Join-Path $TestDrive 'matched-source')
+        $dest=New-Item -ItemType Directory (Join-Path $TestDrive 'matched-dest')
+        [IO.File]::WriteAllText((Join-Path $source.FullName 'new.txt'),'same bytes')
+        [IO.File]::WriteAllText((Join-Path $dest.FullName 'old.txt'),'same bytes')
+        $run=Invoke-BackupPlan @(@{Id='docs';Path=$source.FullName}) $dest.FullName Audit -QuickAudit -DependencyPolicy Exclude
+        $row=Import-Csv (Join-Path $run 'inventario.csv')
+        $row.Status | Should -Be REUSED_EXISTING
+        $row.SHA256 | Should -Match '^[A-F0-9]{64}$'
+    }
+}
+
 Describe 'Resilient enumeration and chunked progress' {
     It 'continues past a rejected junction and honors explicit exclusions' {
         $root=New-Item -ItemType Directory (Join-Path $TestDrive 'tree')

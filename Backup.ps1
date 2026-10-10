@@ -7,12 +7,15 @@ param(
     [switch]$Setup,
     [switch]$OpenReport,
     [switch]$AutoDiscover,
-    [ValidateSet('Auto','Exclude','Include')][string]$DependencyPolicy='Auto'
+    [ValidateSet('Auto','Exclude','Include')][string]$DependencyPolicy='Auto',
+    [switch]$FullAudit
 )
 cd $PSScriptRoot
 $ErrorActionPreference = 'Stop'
 Import-Module "$PSScriptRoot\src\Backup.Core.psm1" -Force
 try {
+    # O modo manual preserva a política anterior; só o automático muda para Exclude.
+    if (-not $PSBoundParameters.ContainsKey('DependencyPolicy') -and $AutoDiscover) { $DependencyPolicy='Exclude' }
     if ([string]::IsNullOrWhiteSpace($Config)) {
         $Config = Join-Path -Path $PSScriptRoot -ChildPath 'backup.local.json'
     } elseif (-not [IO.Path]::IsPathRooted($Config)) {
@@ -26,7 +29,8 @@ try {
     $options = @{}
     if ($AutoDiscover) {
         $plan = Get-AutomaticBackupPlan
-        $options = @{Discovery=$plan.Discovery;ExcludedPaths=$plan.ExcludedPaths;Scope='Descoberta automática'}
+        $options = @{Discovery=$plan.Discovery;ExcludedPaths=$plan.ExcludedPaths;Scope='Descoberta automática focada'}
+        if ($Mode -eq 'Audit' -and -not $FullAudit) { $options.QuickAudit=$true }
     } else { $plan = Get-Content -LiteralPath $Config -Raw | ConvertFrom-Json }
     $destination = $null
     if ($plan.PSObject.Properties['Destination']) { $destination = [string]$plan.Destination }

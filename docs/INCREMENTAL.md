@@ -4,9 +4,9 @@
 
 | Técnica | Uso real | O que não autoriza |
 |---|---|---|
-| Política top-down | Adia bibliotecas reconhecidas; prioriza dados essenciais | Descartar uma pasta apenas porque seu nome parece irrelevante |
+| Política top-down | Seleciona pastas pessoais/dados antes de enumerar; padrão Exclude no modo automático para dependências e caches | Afirmar que diretórios fora do escopo estão protegidos |
 | Índice por tamanho | Enumera o destino sem ler todo o conteúdo; só calcula hashes nos grupos de tamanho solicitados por origens | Ignorar arquivos pequenos ou únicos no backup |
-| SHA-256 em blocos | Verifica origens, cópias e candidatos reutilizados | Tratar metadados ou similaridade como identidade |
+| SHA-256 em blocos | Verifica backups e candidatos reutilizados; auditoria rápida só lê conteúdo se houver candidato do mesmo tamanho | Tratar metadados ou similaridade como identidade |
 | Merkle persistente | Grava `merkle.json`, checksum e diferenças entre inventários; comparação para na raiz de uma subárvore igual | Pular leitura de uma origem porque o manifesto antigo não mudou |
 | MinHash + LSH | Seleciona pares candidatos entre pastas; Jaccard confirma semelhança de nomes nos conjuntos analisados | Mover, apagar ou omitir cópias por semelhança |
 
@@ -14,7 +14,7 @@
 
 O índice inicial enumera nomes e tamanhos no destino. Ao comparar uma origem, apenas a classe de mesmo tamanho é lida para construir seu índice SHA-256. Classes nunca solicitadas permanecem sem leitura de conteúdo. Quando uma classe é resolvida, o índice permanece em memória naquela execução; o candidato escolhido é **rehashado antes de reutilizar**. Cópias novas verificadas entram no índice.
 
-Todas as origens elegíveis continuam recebendo hash, inclusive arquivos vazios, pequenos e de tamanho único. Deduplicação e integridade são finalidades diferentes. Um documento único não é descartável, e um tamanho único não prova que sua cópia foi feita corretamente. Não há corte de 64 MB nem exclusão automática por extensão.
+**No modo Backup e na auditoria completa (-FullAudit),** todas as origens elegíveis continuam recebendo hash, inclusive arquivos vazios, pequenos e de tamanho único. **Na auditoria automática rápida**, arquivos sem candidatos de mesmo tamanho no destino recebem NEEDS_COPY sem hash, economizando I/O. A cópia posterior continua integralmente verificada. Deduplicação e integridade são finalidades diferentes. Um documento único não é descartável, e um tamanho único não prova que sua cópia foi feita corretamente. Não há corte de 64 MB nem exclusão automática por extensão.
 
 Esse índice pode ainda ser caro se muitos arquivos tiverem o mesmo tamanho. Alterações externas durante a execução podem gerar falhas ou perder oportunidades de deduplicação; nenhuma decisão usa um hash antigo sem revalidar o candidato selecionado. O sistema não é snapshot transacional.
 
@@ -35,7 +35,7 @@ A comparação testa hashes de diretório e encerra a descida quando uma subárv
 
 ### O que “incremental” significa aqui
 
-O backup já reaproveita conteúdo confirmado e copia apenas o necessário. Agora os manifestos permitem comparação hierárquica entre execuções, e o índice de destino evita leituras de classes de tamanho irrelevantes. **Não há cache que dispense a releitura de origens baseado somente em nome, tamanho ou data.** O snapshot atual precisa de hashes atuais; depois disso, a comparação dos manifestos pode pular subárvores iguais.
+O backup já reaproveita conteúdo confirmado e copia apenas o necessário. Agora os manifestos permitem comparação hierárquica entre execuções, e o índice de destino evita leituras de classes de tamanho irrelevantes. **Não há cache que dispense a releitura de origens baseado somente em nome, tamanho ou data.** Para comparar subárvores com hash válido, o inventário atual precisa de hashes atuais; na auditoria rápida, folhas sem hash ficam UNREAD e não permitem afirmar igualdade dessa subárvore. O manifesto nunca dispensa validação do backup.
 
 Para eliminar essas releituras com garantias maiores, seria necessário integrar e validar uma fonte confiável de mudanças (por exemplo, journal NTFS com identidade, continuidade e fallback integral) e/ou snapshots. Isso não foi implementado. Merkle sozinho não detecta uma mudança que ninguém observou.
 
@@ -66,3 +66,9 @@ Em `--watch`, a própria sessão aproveita assinaturas da análise anterior e ve
 - [Datasketch: MinHash LSH](https://ekzhu.com/datasketch/lsh.html): bandas, seleção aproximada e possibilidade de falsos positivos/negativos. O projeto usa implementação própria limitada, sem dependência dessa biblioteca.
 
 O prompt mistura descoberta de duplicatas com verificação de backup. Pular hashes de tamanhos únicos pode servir ao primeiro objetivo, mas não assegura o segundo. SHA-256 oferece evidência criptográfica forte; não é comparação literal byte a byte nem uma garantia matemática de ausência de colisões. Compressão e fragmentação de arquivos não foram adicionadas nesta etapa.
+
+## Escolha pragmática para o uso cotidiano
+
+O maior ganho vem de **não enumerar árvores de software**: primeiro selecionamos pastas com dados pessoais e projetos, depois aplicamos filtros estruturais em dependências/caches, e por fim comparamos os arquivos elegíveis. Isso reduz operações de metadados e leitura de conteúdo, sem introduzir um classificador semântico no caminho crítico. O custo de percorrer uma pasta excluída por nome é O(1) no nível da decisão; arquivos dentro de raízes selecionadas ainda precisam ser enumerados para cobertura. SHA-256 tem custo proporcional aos bytes efetivamente lidos; MinHash/LSH fica isolado no painel opcional, não no backup.
+
+Pastas de nome desconhecido não são apagadas nem classificadas como dispensáveis: aparecem como escopo não examinado para revisão manual. Esse compromisso reduz trabalho, mas **não oferece descoberta exaustiva**. Uma mudança de nome, uma pasta de dados em ProgramData ou um arquivo solto na raiz pode exigir inclusão manual. A segurança depende da revisão do escopo e de restaurações testadas.

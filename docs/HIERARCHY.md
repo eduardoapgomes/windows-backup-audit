@@ -1,8 +1,10 @@
+> **Mudança de escopo (2026-10):** a descoberta automática não varre mais C:\\, Users ou todos os volumes. Seleciona pastas de informação e deixa outros locais para revisão manual. A auditoria automática usa hash sob demanda; o Backup continua verificado.
+
 # Decisões hierárquicas e análise de semelhança
 
 ## Implementado: dados essenciais primeiro
 
-A política padrão é `-DependencyPolicy Auto`:
+No modo **automático**, o ponto de entrada `Backup.ps1` usa **`-DependencyPolicy Exclude` como padrão**. No modo **manual**, mantém o padrão anterior **Auto**. A política `Auto` descrita abaixo também pode ser escolhida explicitamente no automático:
 
 1. A auditoria identifica diretórios de bibliotecas por estrutura e marcadores, registra a decisão e não enumera seu conteúdo.
 2. Código próprio, notebooks, documentos, dados, `.git`, manifests/lockfiles, `pyvenv.cfg` e `conda-meta` continuam no fluxo normal. Não excluímos uma pasta inteira por se chamar `venv`, `env`, `Lib` ou `anaconda3`.
@@ -11,13 +13,14 @@ A política padrão é `-DependencyPolicy Auto`:
 5. Se faltar espaço, a pasta opcional recebe `NOT_COPIED_SPACE`. Não se apaga nenhuma cópia para abrir espaço. Se houver erro essencial/anterior, recebe `NOT_COPIED_ESSENTIAL_OR_PREVIOUS_ERRORS`. Copiar bibliotecas não tem prioridade sobre resolver dados essenciais.
 6. Quando há espaço, reabre-se o índice das bibliotecas do destino e reutiliza-se conteúdo idêntico. Cópias opcionais continuam verificadas por SHA-256, com os mesmos controles físicos e de staging.
 
-`-DependencyPolicy Exclude` omite bibliotecas tanto da auditoria quanto do backup. `-DependencyPolicy Include` volta ao exame completo e pode demorar. São opções explícitas no ponto de entrada Backup.ps1; Auto vale também no menu.
+`-DependencyPolicy Exclude` omite bibliotecas tanto da auditoria quanto do backup. `-DependencyPolicy Include` volta ao exame completo e pode demorar. São opções explícitas no ponto de entrada Backup.ps1; o menu automático usa Exclude e o manual mantém Auto. Caches gerados conhecidos nunca entram na fase opcional de Auto.
 
 ### Reconhecimento conservador
 
 - Node: diretório `node_modules` com `package.json` no pai ou `.package-lock.json` na própria pasta.
 - Python no Windows: `Lib\site-packages` cujo ambiente contém `pyvenv.cfg`, `conda-meta\history`, ou a combinação `Scripts\activate.bat` e `Scripts\python.exe`.
-- Sem marcador suficiente, o conteúdo continua sendo examinado.
+- Caches `__pycache__`, `.pytest_cache`, `.mypy_cache` e `.ruff_cache` são reconhecidos pelo nome e podados como diretórios; use Include para inspecioná-los.
+- Sem marcador suficiente para bibliotecas Node/Python, o conteúdo continua sendo examinado.
 - Links/junctions permanecem bloqueados antes de aplicar a política. Não executamos Python/npm/Conda encontrados para identificar ambientes.
 
 Esses marcadores identificam a função habitual da pasta, não provam que todos os seus arquivos sejam descartáveis. Alterações locais feitas dentro de bibliotecas, pacotes privados/locais ou versões indisponíveis podem não ser recuperáveis por reinstalação. Use Include nesses casos. Preservar receitas e lockfiles ajuda, mas não garante reconstrução bit a bit. O programa não gera automaticamente um environment.yml nem promete transportar um ambiente virtual funcional.

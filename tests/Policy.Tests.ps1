@@ -19,6 +19,25 @@ Describe 'Hierarchical dependency policy' {
         $decisions[0].EstimatedBytes | Should -BeNullOrEmpty
         $decisions[0].Decision | Should -Be DEFERRED
     }
+    It 'prunes generated caches at directory boundaries without excluding notebooks' {
+        $cache=New-Item -ItemType Directory "$project\.pytest_cache\v" -Force
+        [IO.File]::WriteAllText((Join-Path $cache.FullName 'cache.bin'),'generated')
+        Mock Get-ChildItem -ModuleName Backup.Core { throw 'cache must not be enumerated' } -ParameterFilter { $LiteralPath -like '*\.pytest_cache*' }
+        $files=@(Get-BackupFiles $project.FullName -DependencyPolicy Exclude -Dependencies $decisions)
+        $files.Name | Should -Contain work.ipynb
+        $files.Name | Should -Not -Contain cache.bin
+        @($decisions | Where-Object Kind -eq 'Cache gerado').Count | Should -Be 1
+        @($decisions | Where-Object Kind -eq 'Cache gerado')[0].Decision | Should -Be EXCLUDED_BY_POLICY
+    }
+    It 'does not re-add generated caches in the optional backup phase' {
+        Mock Assert-ExternalDestination -ModuleName Backup.Core { @{DiskId='test';VolumeId='test';FreeBytes=100GB;Drive='Z:\'} }
+        $cache=New-Item -ItemType Directory "$project\__pycache__" -Force
+        [IO.File]::WriteAllText((Join-Path $cache.FullName 'cache.pyc'),'generated')
+        $dest=New-Item -ItemType Directory (Join-Path $TestDrive 'cache-backup')
+        $run=Invoke-BackupPlan @(@{Id='project';Path=$project.FullName}) $dest.FullName Backup
+        Test-Path "$dest\project\__pycache__" | Should -BeFalse
+        (Import-Csv "$run\dependencias.csv" | Where-Object Kind -eq 'Cache gerado').Decision | Should -Be EXCLUDED_GENERATED_CACHE
+    }
     It 'requires evidence, and Include explicitly disables dependency skipping' {
         Remove-Item "$project\package.json"
         @(Get-BackupFiles $project.FullName -DependencyPolicy Auto -Dependencies $decisions).Name | Should -Contain library.js
