@@ -64,7 +64,7 @@ Copie **alguns arquivos do HD USB para uma pasta vazia** fora das origens: um do
 
 **A energia acabou no meio da execução.** `ANDAMENTO.html` e arquivos CSV parciais **não confirmam um backup completo**. Não apague pastas temporárias ou versões antigas sem revisão. Confira o que já existe no USB, execute uma nova auditoria e depois o backup no mesmo destino. Arquivos reutilizados são novamente comparados por SHA-256.
 
-**Por que não examinou `node_modules` ou caches?** O padrão evita bibliotecas Node/Python reconhecidas e caches regeneráveis. Se você modificou código dentro dessas pastas, use a opção avançada `-DependencyPolicy Include` e confira o espaço disponível.
+**Por que não examinou `node_modules` ou caches?** O modo automático usa `Exclude` para bibliotecas Node/Python reconhecidas e caches regeneráveis. O modo manual mantém a política `Auto` anterior. Se você modificou código dentro dessas pastas, use a opção avançada `-DependencyPolicy Include` e confira o espaço disponível.
 
 **E se houver arquivos repetidos?** O programa verifica hashes SHA-256 e pode reutilizar uma cópia existente; não remove duplicatas antigas. Não mova nem apague arquivos reutilizados sem considerar o `inventario.csv`.
 
