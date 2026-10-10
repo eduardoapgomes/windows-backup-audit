@@ -2,7 +2,7 @@
 
 Projeto de auditoria e backup para **Windows 10/11, PowerShell 5.1 e HD/SSD externo USB em NTFS**. Protege documentos, fotos, vídeos, projetos, notebooks e código-fonte sem tentar fazer uma imagem do Windows.
 
-**Novidade:** a descoberta automática não varre mais `C:\` ou outros discos inteiros. Ela escolhe pastas pessoais conhecidas e pastas de trabalho encontradas **apenas no primeiro nível** do perfil e dos discos internos. Pastas de programas, caches e o restante de `AppData` não entram automaticamente. Isso reduz o escopo e evita milhares de arquivos irrelevantes, **mas exige que você revise o que ficou de fora**.
+**Novidade:** a descoberta automática não varre mais `C:\` ou outros discos inteiros. Ela escolhe pastas pessoais conhecidas e pastas de trabalho encontradas **apenas no primeiro nível** do perfil e dos discos internos. O Windows e instalações de software **fora das raízes selecionadas** deixam de ser examinados por padrão. Caches que estejam dentro de projetos ainda podem ser percorridos, exceto bibliotecas reconhecidas e adiadas pela política. Isso reduz o escopo, **mas exige revisar o que ficou de fora**.
 
 ## Como usar
 
