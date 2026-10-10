@@ -17,7 +17,7 @@
 
 - Pastas conhecidas do usuário atual: Documentos, Área de Trabalho, Downloads, Imagens, Música, Vídeos, Favoritos e OneDrive quando disponível.
 - Pastas de dados/projetos com nomes reconhecidos, como **Projetos, Projects, Code, Repos, Dados, Data, Trabalho, Work, Estudos, Notebooks**, no perfil e no topo dos volumes internos.
-- **Não percorre** automaticamente a raiz de `C:\${b}, `C:\Users`, `AppData`, `Program Files`, `Windows`, caches ou todas as pastas de software. Outros nomes e arquivos soltos nas raízes dos discos são sinalizados para **REVIEW**, não declarados protegidos.
+- **Não percorre** automaticamente a raiz de `C:\`, `C:\Users`, `AppData`, `Program Files`, `Windows`, caches ou todas as pastas de software. Outros nomes e arquivos soltos nas raízes dos discos são sinalizados para **REVIEW**, não declarados protegidos.
 
 Uma pasta com nome incomum pode conter dados importantes: **inclua-a pelo modo manual**. O modo automático não substitui essa revisão.
 
