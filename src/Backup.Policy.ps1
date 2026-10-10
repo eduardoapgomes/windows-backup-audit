@@ -3,6 +3,13 @@
     $name=[IO.Path]::GetFileName($Path.TrimEnd('\'))
     $parent=[IO.Path]::GetDirectoryName($Path.TrimEnd('\'))
     if (-not $parent) { return $null }
+    # Caches regeneráveis conhecidos: decisão por diretório, sem visitar milhares
+    # de arquivos .pyc e índices. -DependencyPolicy Include permite auditoria total.
+    if ($name -in @('__pycache__','.pytest_cache','.mypy_cache','.ruff_cache')) {
+        return [pscustomobject]@{Path=$Path;Kind='Cache gerado';Evidence='Nome padrão de cache';Decision='DEFERRED';
+            EstimatedBytes=$null;OwnerRoot='';OwnerId='';
+            Note='Cache regenerável não é incluído por padrão. Use Include se você guardou dados próprios aqui.'}
+    }
     $evidence=$null; $kind=$null
     if ($name -ieq 'node_modules') {
         foreach ($marker in @((Join-Path $parent 'package.json'),(Join-Path $Path '.package-lock.json'))) {
