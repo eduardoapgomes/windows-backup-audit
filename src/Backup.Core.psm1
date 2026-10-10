@@ -185,7 +185,7 @@ function Find-ExistingContent {
 function Invoke-BackupPlan {
     param([object[]]$Sources, [string]$Destination, [ValidateSet('Audit','Backup')][string]$Mode = 'Audit',
         [object[]]$Discovery=@(), [string[]]$ExcludedPaths=@(), [string]$Scope='Configuração manual', [switch]$OpenReport,
-        [ValidateSet('Auto','Exclude','Include')][string]$DependencyPolicy='Auto')
+        [ValidateSet('Auto','Exclude','Include')][string]$DependencyPolicy='Auto', [switch]$QuickAudit)
     Assert-BackupDependencies -Mode $Mode
     if (-not $Sources -or $Sources.Count -eq 0) { throw 'Configure pelo menos uma origem.' }
     $sourcePaths = @($Sources | ForEach-Object { [string]$_.Path })
@@ -221,7 +221,7 @@ function Invoke-BackupPlan {
         $indexSkipped=New-Object 'Collections.Generic.List[object]'
         $csv = Join-Path $run 'inventario.csv'
         $Discovery | Export-Csv -LiteralPath (Join-Path $run 'cobertura.csv') -NoTypeInformation -Encoding UTF8
-        [pscustomobject]@{Scope=$Scope;Sources=$Sources;ExcludedPaths=$ExcludedPaths;Discovery=$Discovery;DependencyPolicy=$DependencyPolicy} |
+        [pscustomobject]@{Scope=$Scope;Sources=$Sources;ExcludedPaths=$ExcludedPaths;Discovery=$Discovery;DependencyPolicy=$DependencyPolicy;QuickAudit=[bool]$QuickAudit} |
             ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $run 'plano.json') -Encoding UTF8
         $script:BackupProgress.Run=$run
         $script:BackupProgress.Identity=$identity
@@ -245,6 +245,13 @@ function Invoke-BackupPlan {
             Write-BackupPartial -Phase 'Índice incompleto' -Finished
             throw "Índice do backup incompleto; nenhuma cópia iniciada. Consulte $run"
         }
+        # Auditoria rápida: tamanhos sem candidatos no destino não precisam de SHA.
+        # Nunca usar esta otimização no Backup; toda cópia é verificada por conteúdo.
+        $knownSizes=New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+        foreach ($key in $index.Keys) {
+            if ($key.StartsWith('@size|',[StringComparison]::Ordinal)) { $null=$knownSizes.Add($key.Substring(6)) }
+        }
+        $script:BackupProgress.QuickAuditUnhashed=0
         $optionalIndexed=$false
         $tasks=New-Object 'Collections.Generic.List[object]'
         foreach ($source in $Sources) { $tasks.Add([pscustomobject]@{Id=$source.Id;Path=$source.Path;BasePath=$source.Path;Optional=$false;Decision=$null}) }
@@ -290,8 +297,17 @@ function Invoke-BackupPlan {
                         $status = 'NEEDS_COPY'; $hash = ''; $message = ''; $actual = ''
                         try {
                             $null = Assert-ExternalDestination $target $sourcePaths $identity
-                            $hash = Get-BackupHash $file.FullName -Source
-                            $existing = Find-ExistingContent $hash $file.Length $index
+                            $mustHash = $Mode -eq 'Backup' -or -not $QuickAudit -or $knownSizes.Contains([string]$file.Length)
+                            $existing = $null
+                            if ($mustHash) {
+                                $hash = Get-BackupHash $file.FullName -Source
+                                $existing = Find-ExistingContent $hash $file.Length $index
+                            } else {
+                                # Sem leitura de conteúdo: verificar disponibilidade e registrar
+                                # SHA vazio. NEEDS_COPY não é uma confirmação de integridade.
+                                Assert-SourceFileAvailable $file.FullName
+                                $script:BackupProgress.QuickAuditUnhashed++
+                            }
                             if ($existing) {
                                 $actual = $existing
                                 $status = if ($existing -eq $target) { 'SKIP_IDENTICAL' } else { 'REUSED_EXISTING' }
@@ -344,10 +360,11 @@ function Invoke-BackupPlan {
         [pscustomobject]@{HashReads=$script:BackupProgress.Files;HashBytes=$script:BackupProgress.Bytes;
             HashSeconds=$script:BackupProgress.HashSeconds;DestinationIndexedFiles=$script:BackupProgress.DestinationIndexedFiles;
             DestinationHashCandidates=$script:BackupProgress.DestinationHashCandidates;SizeBucketsResolved=$script:BackupProgress.SizeBucketsResolved;
+            QuickAuditUnhashed=$script:BackupProgress.QuickAuditUnhashed;
             ElapsedSeconds=([DateTime]::UtcNow-$script:BackupProgress.Started).TotalSeconds} |
             ConvertTo-Json | Set-Content -LiteralPath (Join-Path $run 'metricas.json') -Encoding UTF8
         [pscustomobject]@{Mode=$Mode; Errors=$errors; Report=$run; FormattingDecision='NOT_ASSESSED';
-            DiskId=$identity.DiskId; VolumeId=$identity.VolumeId; DependencyPolicy=$DependencyPolicy; DependencyFolders=$dependencies.Count} |
+            DiskId=$identity.DiskId; VolumeId=$identity.VolumeId; DependencyPolicy=$DependencyPolicy; DependencyFolders=$dependencies.Count;QuickAudit=[bool]$QuickAudit} |
             ConvertTo-Json | Set-Content -LiteralPath (Join-Path $run 'resumo.json') -Encoding UTF8
         Write-BackupReview -Run $run -Sources $Sources -Mode $Mode -Errors $errors
         Write-BackupPartial -Phase 'Execução encerrada' -Finished
