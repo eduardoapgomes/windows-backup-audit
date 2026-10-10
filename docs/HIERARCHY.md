@@ -4,7 +4,7 @@
 
 ## Implementado: dados essenciais primeiro
 
-O ponto de entrada `Backup.ps1` agora usa **`-DependencyPolicy Exclude` como padrão**. A política `Auto` descrita abaixo continua disponível **somente quando solicitada explicitamente**:
+No modo **automático**, o ponto de entrada `Backup.ps1` usa **`-DependencyPolicy Exclude` como padrão**. No modo **manual**, mantém o padrão anterior **Auto**. A política `Auto` descrita abaixo também pode ser escolhida explicitamente no automático:
 
 1. A auditoria identifica diretórios de bibliotecas por estrutura e marcadores, registra a decisão e não enumera seu conteúdo.
 2. Código próprio, notebooks, documentos, dados, `.git`, manifests/lockfiles, `pyvenv.cfg` e `conda-meta` continuam no fluxo normal. Não excluímos uma pasta inteira por se chamar `venv`, `env`, `Lib` ou `anaconda3`.
@@ -13,7 +13,7 @@ O ponto de entrada `Backup.ps1` agora usa **`-DependencyPolicy Exclude` como pad
 5. Se faltar espaço, a pasta opcional recebe `NOT_COPIED_SPACE`. Não se apaga nenhuma cópia para abrir espaço. Se houver erro essencial/anterior, recebe `NOT_COPIED_ESSENTIAL_OR_PREVIOUS_ERRORS`. Copiar bibliotecas não tem prioridade sobre resolver dados essenciais.
 6. Quando há espaço, reabre-se o índice das bibliotecas do destino e reutiliza-se conteúdo idêntico. Cópias opcionais continuam verificadas por SHA-256, com os mesmos controles físicos e de staging.
 
-`-DependencyPolicy Exclude` omite bibliotecas tanto da auditoria quanto do backup. `-DependencyPolicy Include` volta ao exame completo e pode demorar. São opções explícitas no ponto de entrada Backup.ps1; o menu usa Exclude por padrão. Caches gerados conhecidos nunca entram na fase opcional de Auto.
+`-DependencyPolicy Exclude` omite bibliotecas tanto da auditoria quanto do backup. `-DependencyPolicy Include` volta ao exame completo e pode demorar. São opções explícitas no ponto de entrada Backup.ps1; o menu automático usa Exclude e o manual mantém Auto. Caches gerados conhecidos nunca entram na fase opcional de Auto.
 
 ### Reconhecimento conservador
 
