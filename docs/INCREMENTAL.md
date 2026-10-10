@@ -4,7 +4,7 @@
 
 | Técnica | Uso real | O que não autoriza |
 |---|---|---|
-| Política top-down | Seleciona pastas pessoais/dados antes de enumerar; padrão Exclude para dependências e caches | Afirmar que diretórios fora do escopo estão protegidos |
+| Política top-down | Seleciona pastas pessoais/dados antes de enumerar; padrão Exclude no modo automático para dependências e caches | Afirmar que diretórios fora do escopo estão protegidos |
 | Índice por tamanho | Enumera o destino sem ler todo o conteúdo; só calcula hashes nos grupos de tamanho solicitados por origens | Ignorar arquivos pequenos ou únicos no backup |
 | SHA-256 em blocos | Verifica backups e candidatos reutilizados; auditoria rápida só lê conteúdo se houver candidato do mesmo tamanho | Tratar metadados ou similaridade como identidade |
 | Merkle persistente | Grava `merkle.json`, checksum e diferenças entre inventários; comparação para na raiz de uma subárvore igual | Pular leitura de uma origem porque o manifesto antigo não mudou |
