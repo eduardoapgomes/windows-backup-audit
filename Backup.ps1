@@ -7,13 +7,15 @@ param(
     [switch]$Setup,
     [switch]$OpenReport,
     [switch]$AutoDiscover,
-    [ValidateSet('Auto','Exclude','Include')][string]$DependencyPolicy='Exclude',
+    [ValidateSet('Auto','Exclude','Include')][string]$DependencyPolicy='Auto',
     [switch]$FullAudit
 )
 cd $PSScriptRoot
 $ErrorActionPreference = 'Stop'
 Import-Module "$PSScriptRoot\src\Backup.Core.psm1" -Force
 try {
+    # O modo manual preserva a política anterior; só o automático muda para Exclude.
+    if (-not $PSBoundParameters.ContainsKey('DependencyPolicy') -and $AutoDiscover) { $DependencyPolicy='Exclude' }
     if ([string]::IsNullOrWhiteSpace($Config)) {
         $Config = Join-Path -Path $PSScriptRoot -ChildPath 'backup.local.json'
     } elseif (-not [IO.Path]::IsPathRooted($Config)) {
