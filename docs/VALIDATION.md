@@ -5,6 +5,8 @@ Em 08/10/2026, **64 testes Pester passaram, 0 falhas, 0 ignorados**, em Windows 
 - Commit de código testado: a2aa8f1836cf7cd89a0294d4a363f84fede9f2de
 - Execução: https://github.com/eduardoapgomes/windows-backup-audit/actions/runs/37818723114
 
+> **Atenção:** os resultados históricos acima se referem ao commit citado, **não** às mudanças posteriores de descoberta focada, auditoria rápida e caches. Essas alterações exigem nova execução da CI/Pester e teste manual em Windows com USB antes de serem consideradas validadas. Não reutilize o número 88 como evidência da nova versão.
+
 ## Cobertura executada
 
 - Índice sob demanda por tamanho: conteúdo sem tamanho correspondente nunca aberto, arquivo pequeno único copiado/verificado e candidato alterado rehashado após resolução do índice.
@@ -36,7 +38,7 @@ Somente a política física é substituída por um mock nos testes de arquivos: 
 
 ## Validação manual necessária
 
-Varredura completa do computador do usuário, atualização automática do HTML no navegador, OneDrive real (arquivos locais e somente online), assistente gráfico de configuração, menu Iniciar.cmd, abertura do relatório no navegador, janela de seleção/cancelamento, acesso ao módulo Storage, reconhecimento do seu USB/NTFS, desconexão/troca física, bloqueio do disco interno no hardware real, caminhos longos e restauração dos seus documentos nos aplicativos originais. Não executar ensaios destrutivos sobre dados únicos.
+Auditoria focada no computador do usuário, revisão de pastas importantes não reconhecidas, comparação entre auditoria rápida e completa, interrupção por falta de energia, atualização automática do HTML no navegador, OneDrive real (arquivos locais e somente online), assistente gráfico de configuração, menu Iniciar.cmd, abertura do relatório no navegador, janela de seleção/cancelamento, acesso ao módulo Storage, reconhecimento do seu USB/NTFS, desconexão/troca física, bloqueio do disco interno no hardware real, caminhos longos e restauração dos seus documentos nos aplicativos originais. Não executar ensaios destrutivos sobre dados únicos.
 
 A referência da pesquisa foi renomeada para Research-Backup.ps1.txt e não é ponto de entrada executável do projeto. Não houve validação integral daquele texto.
 
