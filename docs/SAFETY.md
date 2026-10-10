@@ -6,7 +6,7 @@ Destino em USB/NTFS, identificação única de disco e volume, mídia gravável 
 
 O módulo Storage do Windows informa a identidade física e o BusType. Não existe detecção universal infalível de localização física: caixas USB incomuns, controladores e políticas de acesso podem impedir a identificação; nesse caso a execução para. Thunderbolt/eSATA que aparecem como NVMe/SATA também ficam bloqueados nesta versão. USB interno reportado pelo hardware como USB não pode ser universalmente distinguido de USB externo. Não se promete risco zero.
 
-O script não formata, não altera partições e não escreve conteúdo nas origens. Lê origens para hash e cópia; efeitos normais do Windows/provedor, como cache e timestamps de acesso, podem ocorrer. Aplicações ativas devem ser fechadas. O lock de leitura protege cada cópia contra escritores concorrentes, mas não fornece snapshot de um conjunto de arquivos/banco.
+O script não formata, não altera partições e não escreve conteúdo nas origens. O backup lê origens para hash e cópia; a auditoria automática rápida pode evitar a leitura integral de arquivos sem candidatos de mesmo tamanho no destino; efeitos normais do Windows/provedor, como cache e timestamps de acesso, podem ocorrer. Aplicações ativas devem ser fechadas. O lock de leitura protege cada cópia contra escritores concorrentes, mas não fornece snapshot de um conjunto de arquivos/banco.
 
 ## Gravações
 
@@ -18,7 +18,7 @@ Um processo privilegiado hostil pode trocar caminhos entre uma checagem e um ace
 
 ## Cópias parciais/manuais
 
-O índice lista arquivos regulares sob a pasta selecionada; exclui relatórios, lock, staging e versões anteriores. O índice usa tamanho + SHA-256, calculado uma vez na varredura inicial. Cada candidato reutilizado é revalidado por SHA-256 antes da decisão, evitando confiar apenas no índice. Arquivo igual em outro caminho recebe REUSED_EXISTING e Destination aponta para a cópia real. Nenhum hard link é criado. Duplicatas preexistentes não são removidas.
+O índice lista arquivos regulares sob a pasta selecionada; exclui relatórios, lock, staging e versões anteriores. O índice inicial lê nomes e tamanhos; calcula SHA-256 somente para classes de tamanho solicitadas pelas origens. Arquivos escolhidos para reutilização são revalidados por hash. Cada candidato reutilizado é revalidado por SHA-256 antes da decisão, evitando confiar apenas no índice. Arquivo igual em outro caminho recebe REUSED_EXISTING e Destination aponta para a cópia real. Nenhum hard link é criado. Duplicatas preexistentes não são removidas.
 
 O CSV é parte do backup: Source → Destination registra como reconstruir os caminhos. RelativePath começa com .\ para não virar fórmula ao abrir no Excel. Várias origens podem apontar para uma mesma cópia; não mova/apague essa cópia. O repositório precisa ser movido como conjunto com seus relatórios; os caminhos absolutos do CSV terão de ser ajustados para uma nova letra de disco na restauração. Não há restauração automatizada nesta versão.
 
@@ -54,8 +54,14 @@ Referências da implementação:
 
 ## Varredura automática e acompanhamento
 
--AutoDiscover expande o escopo para volumes internos habilitados, inclusive o volume de sistema como origem. Isso não altera as regras de destino: gravar em mídia interna continua bloqueado. As raízes, exclusões e falhas da descoberta são persistidas em plano.json/cobertura.csv. Links ou pastas inacessíveis são registrados em falhas-enumeracao.csv e as demais subárvores continuam; qualquer falha deixa a execução incompleta. Não há elevação automática nem alteração de ACLs.
+-AutoDiscover **não** usa raízes de volumes nem o perfil inteiro como origem. Seleciona pastas pessoais e pastas de dados/projetos com nomes reconhecidos; marca a raiz de cada volume interno como REVIEW para lembrar que outras pastas e arquivos soltos não foram examinados. A seleção e as falhas ficam em plano.json/cobertura.csv. O destino continua exigindo USB/NTFS e disco físico separado. Links ou pastas inacessíveis são registrados em falhas-enumeracao.csv e as demais subárvores continuam; qualquer falha deixa a execução incompleta. Não há elevação automática nem alteração de ACLs.
 
 ANDAMENTO.html e andamento.json são snapshots parciais, atualizados aproximadamente a cada 5 segundos enquanto a execução avança; o navegador recarrega a página a cada 10 segundos. O horário pode ficar parado durante I/O bloqueado, remoção da mídia ou interrupção. Somente o relatório final permite avaliar o resultado da execução, e mesmo ele não autoriza formatação. Os CSVs são incrementais e não constituem uma confirmação de cobertura enquanto o processo estiver em execução. SHA-256 é calculado em blocos para informar leitura de arquivos grandes; a porcentagem é por arquivo, não do conjunto ainda desconhecido.
 
 Referência das pastas conhecidas do Windows: https://learn.microsoft.com/en-us/windows/win32/shell/knownfolderid
+
+## Auditoria rápida, queda de energia e limites de retomada
+
+Na auditoria automática rápida, NEEDS_COPY pode ter SHA256 vazio: o programa verificou metadados/disponibilidade, mas **não leu o conteúdo** quando não havia candidato de mesmo tamanho no destino. O manifesto Merkle marca essas folhas como não verificadas; isso não significa arquivo perdido nem backup concluído. Use -FullAudit para exigir leitura integral na auditoria. **No modo Backup não existe essa otimização:** SHA-256 continua obrigatório para copiar/reutilizar e verificar.
+
+Após interrupção por falta de energia, ANDAMENTO.html, andamento.json e CSVs em progresso são **parciais**. Arquivos de staging ou histórico podem permanecer; não remova manualmente sem revisar. Uma nova execução reenumera as pastas escolhidas e revalida cópias existentes, mas não retoma um arquivo interrompido a partir do byte exato nem substitui snapshot consistente. Se a energia caiu durante a auditoria, nenhum arquivo de origem foi copiado por essa operação; relatórios podem existir no USB.
