@@ -13,27 +13,28 @@
 
 ## Passo 1 — Conferir o que será protegido
 
-No menu, escolha **1 — Auditoria automática**. O programa procura arquivos elegíveis nos discos internos e pede que você selecione o **HD USB** e uma **pasta de destino**.
+No menu, escolha **1 — Auditoria automática**. O programa seleciona **pastas pessoais e pastas de dados/projetos conhecidas**, sem percorrer `C:\`, `C:\Users` ou pastas de instalação de software por inteiro. Depois, pede que você selecione o **HD USB** e uma **pasta de destino**.
 
 - Se já existem backups manuais ou parciais, escolha a pasta que **contém** essas cópias.
 - Se vai começar do zero, escolha a raiz do HD USB; o programa criará sua pasta própria.
 - Aguarde a execução terminar. A página **ANDAMENTO.html** mostra o progresso; ela não confirma sucesso enquanto o processo está rodando.
 
-**A auditoria lê e compara arquivos, mas não os copia.** Ela grava apenas os relatórios no USB. Pode demorar, pois verifica conteúdo por SHA-256.
+**A auditoria não copia arquivos de origem.** Ela grava relatórios no USB. Na auditoria automática rápida, arquivos sem candidatos do mesmo tamanho no destino são registrados como `NEEDS_COPY` sem leitura integral de SHA-256; arquivos comparáveis são verificados por hash. Isso acelera a primeira execução. A opção avançada `-FullAudit` lê todos os arquivos selecionados.
 
 ## Passo 2 — Ler o resultado
 
-Abra **LEIA-ME.html** na pasta de relatório indicada pelo programa (`_RELATORIOS`). Verifique as pastas incluídas, arquivos esperados, exclusões e erros.
+Abra **LEIA-ME.html** na pasta de relatório indicada pelo programa (`_RELATORIOS`). Verifique as pastas `INCLUDED`, os locais `REVIEW` (não examinados), arquivos esperados, exclusões e erros. Pastas de nome incomum e arquivos soltos nas raízes dos discos exigem inclusão manual.
 
 | Mensagem | O que significa |
 |---|---|
-| `NEEDS_COPY` | Ainda precisa de uma cópia |
+| `NEEDS_COPY` | Ainda precisa de uma cópia; na auditoria rápida, SHA-256 pode estar vazio |
 | `SKIP_IDENTICAL` | Já existe cópia igual, conferida |
 | `REUSED_EXISTING` | Cópia igual localizada em outro caminho do destino |
 | `VERIFIED` | Arquivo copiado e conferido no modo Backup |
 | `ERROR` | Houve falha; leia o detalhe e corrija |
+| `REVIEW` em `cobertura.csv` | Local não examinado pelo modo automático; inclua manualmente se houver dados importantes |
 
-**Se aparecer erro, falta de cobertura ou biblioteca opcional não copiada, não considere esses dados protegidos.** Confira também `cobertura.csv` e, quando houver, `falhas-enumeracao.csv` e `dependencias.csv`. A ausência de erros não prova que todo o computador foi incluído.
+**Se aparecer erro, `REVIEW`, falta de cobertura ou dependência excluída, não considere esses dados protegidos.** Confira também `cobertura.csv` e, quando houver, `falhas-enumeracao.csv` e `dependencias.csv`. A ausência de erros não prova que todo o computador foi incluído.
 
 ## Passo 3 — Fazer o backup
 
@@ -59,11 +60,15 @@ Copie **alguns arquivos do HD USB para uma pasta vazia** fora das origens: um do
 
 **Um arquivo do OneDrive não está disponível?** No Explorador, escolha **Sempre manter neste dispositivo**, aguarde o download e execute novamente. Arquivos apenas na nuvem não são confirmados como protegidos.
 
-**Quero selecionar só algumas pastas.** Use as opções **3, 4 e 5** do menu: configurar, auditar e copiar no modo manual. Isso não altera o modo automático.
+**Tenho arquivos em uma pasta diferente (ou soltos em C:\\).** Use as opções **3, 4 e 5** do menu: configurar, auditar e copiar no modo manual. O modo automático é deliberadamente limitado a pastas de dados reconhecidas; não varre o disco inteiro.
+
+**A energia acabou no meio da execução.** `ANDAMENTO.html` e arquivos CSV parciais **não confirmam um backup completo**. Não apague pastas temporárias ou versões antigas sem revisão. Confira o que já existe no USB, execute uma nova auditoria e depois o backup no mesmo destino. Arquivos reutilizados são novamente comparados por SHA-256.
+
+**Por que não examinou `node_modules` ou caches?** O padrão evita bibliotecas Node/Python reconhecidas e caches regeneráveis. Se você modificou código dentro dessas pastas, use a opção avançada `-DependencyPolicy Include` e confira o espaço disponível.
 
 **E se houver arquivos repetidos?** O programa verifica hashes SHA-256 e pode reutilizar uma cópia existente; não remove duplicatas antigas. Não mova nem apague arquivos reutilizados sem considerar o `inventario.csv`.
 
-**Preciso entender Merkle ou MinHash?** Não. O backup gera automaticamente os relatórios de comparação **Merkle**. **MinHash** aparece apenas no mapa visual opcional da opção **8**, que exige Python 3.9+ e sugere pastas parecidas sem mover ou excluir arquivos. Esses recursos não dispensam a verificação do backup.
+**Preciso entender Merkle ou MinHash?** Não. O backup gera automaticamente os relatórios de comparação **Merkle**. Na auditoria rápida, folhas sem SHA ficam explicitamente não verificadas. **MinHash** aparece apenas no mapa visual opcional da opção **8**, que exige Python 3.9+ e sugere pastas parecidas sem mover ou excluir arquivos. Esses recursos não dispensam a verificação do backup.
 
 **Como atualizar o projeto?** Se você usou Git, feche qualquer execução e, na pasta do projeto, rode `git pull --ff-only`. Se baixou ZIP, baixe uma versão nova sem sobrescrever sua configuração manual `backup.local.json`.
 
