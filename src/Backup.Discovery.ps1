@@ -51,7 +51,9 @@ function Get-AutomaticBackupPlan {
                 }
                 $rows.Add([pscustomobject]@{Path=$root;Status='REVIEW';Reason='Raiz não examinada: arquivos soltos e pastas com outros nomes exigem inclusão manual. Não é cobertura integral do volume.'})
                 foreach ($name in $dataFolders) {
-                    $path = Join-Path $root $name
+                    # Path.Combine não depende da unidade estar montada no instante
+                    # da construção; Test-Path confirma a existência em seguida.
+                    $path = [IO.Path]::Combine($root, $name)
                     if (Test-Path -LiteralPath $path -PathType Container) {
                         $candidates.Add([pscustomobject]@{Path=$path;Kind='Pasta de dados identificada no volume interno'})
                     }
