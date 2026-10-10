@@ -1,50 +1,59 @@
-﻿BeforeAll { Import-Module "$PSScriptRoot/../src/Backup.Core.psm1" -Force }
-Describe 'Automatic discovery policy' {
+BeforeAll { Import-Module "$PSScriptRoot/../src/Backup.Core.psm1" -Force }
+Describe 'Data-first automatic discovery' {
     BeforeEach {
         Mock Get-PersonalFolderCandidates -ModuleName Backup.Core {
-            @([pscustomobject]@{Path='C:\People\User';Kind='Profile'},
-              [pscustomobject]@{Path='C:\People\User\Documents';Kind='Documents'},
+            @([pscustomobject]@{Path='C:\People\User\Documents';Kind='Documents'},
+              [pscustomobject]@{Path='C:\People\User\Downloads';Kind='Downloads'},
               [pscustomobject]@{Path='F:\Redirected';Kind='Redirected'})
         }
         Mock Get-Volume -ModuleName Backup.Core { @(@{DriveLetter='C'},@{DriveLetter='D'},@{DriveLetter='E'}) }
         Mock Get-StorageIdentity -ModuleName Backup.Core {
-            @{BusType=$(if ($Path -like 'D:*') {'USB'} else {'NVMe'});IsBoot=($Path -like 'C:*');IsSystem=($Path -like 'C:*');IsOffline=$false}
+            @{BusType=$(if ($Path -like 'D:*') {'USB'} else {'NVMe'});IsOffline=$false}
+        }
+        Mock Get-ChildItem -ModuleName Backup.Core {
+            switch ($LiteralPath) {
+                'C:\' { @([pscustomobject]@{Name='Windows';FullName='C:\Windows'},
+                           [pscustomobject]@{Name='ProgramData';FullName='C:\ProgramData'},
+                           [pscustomobject]@{Name='Users';FullName='C:\Users'}) }
+                'E:\' { @([pscustomobject]@{Name='Projects';FullName='E:\Projects'},
+                           [pscustomobject]@{Name='Program Files';FullName='E:\Program Files'}) }
+                default { @() }
+            }
         }
         Mock Assert-PlainPath -ModuleName Backup.Core {}
         Mock Test-Path -ModuleName Backup.Core { $true }
     }
-    It 'scans system and data volumes including Users, while excluding software paths and USB' {
+    It 'selects only data folders and never uses entire disks or software trees as sources' {
         $plan=Get-AutomaticBackupPlan
-        @($plan.Sources).Count | Should -Be 3
-        $plan.Sources.Path | Should -Contain 'E:\'
+        $plan.Sources.Path | Should -Contain 'C:\People\User\Documents'
+        $plan.Sources.Path | Should -Contain 'C:\People\User\Downloads'
+        $plan.Sources.Path | Should -Contain 'E:\Projects'
         $plan.Sources.Path | Should -Contain 'F:\Redirected'
-        $plan.Sources.Path | Should -Contain 'C:\'
-        $plan.Sources.Path | Should -Not -Contain 'D:\'
-        $plan.Sources.Path | Should -Not -Contain 'C:\People\User\Documents'
-        @($plan.Discovery | Where-Object Status -eq COVERED).Count | Should -Be 2
-        $plan.ExcludedPaths | Should -Contain 'E:\System Volume Information'
-        $plan.ExcludedPaths | Should -Contain 'C:\Windows'
-        $plan.ExcludedPaths | Should -Not -Contain 'C:\Users'
-        $plan.ExcludedPaths | Should -Not -Contain 'C:\ProgramData'
+        foreach ($ignored in @('C:\','E:\','C:\Windows','C:\Users','C:\ProgramData','E:\Program Files','D:\')) {
+            $plan.Sources.Path | Should -Not -Contain $ignored
+        }
+        $plan.Discovery.Status | Should -Contain 'REVIEW_REQUIRED'
+        Should -Invoke Get-ChildItem -ModuleName Backup.Core -ParameterFilter { $LiteralPath -eq 'E:\Projects' } -Times 0 -Exactly
     }
-    It 'keeps source identifiers stable across discovery order changes' {
+    It 'keeps identifiers stable between executions' {
         $first=Get-AutomaticBackupPlan
         $second=Get-AutomaticBackupPlan
         ($first.Sources.Id -join ',') | Should -Be ($second.Sources.Id -join ',')
     }
-    It 'records missing roots instead of silently claiming complete discovery' {
+    It 'reports a missing data root without claiming it is covered' {
         Mock Test-Path -ModuleName Backup.Core { $false } -ParameterFilter { $LiteralPath -eq 'F:\Redirected' }
         $plan=Get-AutomaticBackupPlan
-        @($plan.Discovery | Where-Object Status -eq ERROR).Count | Should -Be 1
         $plan.Sources.Path | Should -Not -Contain 'F:\Redirected'
+        $plan.Discovery.Status | Should -Contain 'ERROR'
     }
-    It 'records a disk metadata failure and does not guess its source eligibility' {
+    It 'records disk identification failure rather than guessing eligibility' {
         Mock Get-StorageIdentity -ModuleName Backup.Core { throw 'unknown disk' } -ParameterFilter { $Path -like 'E:*' }
         $plan=Get-AutomaticBackupPlan
-        $plan.Sources.Path | Should -Not -Contain 'E:\'
-        @($plan.Discovery | Where-Object Status -eq ERROR).Count | Should -Be 1
+        $plan.Sources.Path | Should -Not -Contain 'E:\Projects'
+        $plan.Discovery.Status | Should -Contain 'ERROR'
     }
 }
+
 Describe 'Resilient enumeration and chunked progress' {
     It 'continues past a rejected junction and honors explicit exclusions' {
         $root=New-Item -ItemType Directory (Join-Path $TestDrive 'tree')
