@@ -275,6 +275,7 @@ function Invoke-BackupPlan {
                     }
                     if (-not $optionalIndexed) {
                         foreach ($skipped in $indexSkipped) {
+                            if ($skipped.Kind -eq 'Cache gerado') { continue }
                             $extra=Get-ExistingBackupIndex $skipped.Path
                             foreach ($key in $extra.Keys) {
                                 if (-not $index.ContainsKey($key)) { $index[$key]=New-Object 'Collections.Generic.List[string]' }
@@ -340,6 +341,7 @@ function Invoke-BackupPlan {
             if ($source.Optional) { $source.Decision.Decision=if ($errors -or $issues.Count) {'OPTIONAL_INCOMPLETE'} else {'OPTIONAL_VERIFIED'} }
             if ($taskNumber -eq ($Sources.Count - 1) -and $Mode -eq 'Backup' -and $DependencyPolicy -eq 'Auto') {
                 foreach ($decision in $dependencies) {
+                    if ($decision.Kind -eq 'Cache gerado') { $decision.Decision='EXCLUDED_GENERATED_CACHE'; continue }
                     $tasks.Add([pscustomobject]@{Id=$decision.OwnerId;Path=$decision.Path;BasePath=$decision.OwnerRoot;Optional=$true;Decision=$decision})
                 }
             }
