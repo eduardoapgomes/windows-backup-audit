@@ -23,7 +23,7 @@ Uma pasta com nome incomum pode conter dados importantes: **inclua-a pelo modo m
 
 ### Como a auditoria ficou mais rápida
 
-1. **Top-down:** seleciona as raízes úteis antes de enumerar arquivos. Bibliotecas Node/Python reconhecidas e caches gerados são ignorados no padrão `Exclude`; projetos, notebooks, arquivos de código próprio e manifests continuam elegíveis.
+1. **Top-down:** seleciona as raízes úteis antes de enumerar arquivos. Bibliotecas Node/Python reconhecidas e caches gerados são ignorados no padrão automático `Exclude`; projetos, notebooks, arquivos de código próprio e manifests continuam elegíveis.
 2. **Metadados primeiro:** na auditoria automática, se não existe arquivo de mesmo tamanho no backup, registra `NEEDS_COPY` **sem ler o arquivo inteiro para SHA-256**. Havendo candidatos de mesmo tamanho, usa SHA-256 para confirmar igualdade. Use `-FullAudit` se quiser hash de todos os arquivos da auditoria.
 3. **Backup sem atalhos:** o modo Backup continua calculando SHA-256 e verificando cada cópia/reutilização antes de confirmá-la. Nenhum arquivo é excluído ou movido por similaridade.
 
