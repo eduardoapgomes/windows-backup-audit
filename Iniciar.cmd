@@ -1,101 +1,69 @@
 @echo off
 setlocal EnableExtensions
-cd /d "%~dp0"
+rem Guardar a pasta antes de CALL :rotulo (dentro da subrotina, %0 e o rotulo).
+set "PASTA=%~dp0"
+cd /d "%PASTA%"
+title Windows Backup Audit
+set "SAIDA=0"
+
 :menu
 cls
-echo WINDOWS BACKUP - escolha uma opcao
+echo ==============================================================
+echo   WINDOWS BACKUP AUDIT  -  backup para HD externo
+echo   Nunca apaga arquivos. Cada copia e conferida por SHA-256.
+echo ==============================================================
 echo.
-echo PRIMEIRO USO: 1 confere sem copiar; depois 2 faz o backup.
-echo Para escolher apenas algumas pastas, use 3, 4 e 5.
-echo.
-echo 1. AUDITORIA FOCADA - revisar dados importantes (recomendado)
-echo 2. BACKUP FOCADO - copiar e verificar apos revisar
-echo 3. Configurar pastas manualmente (primeiro uso manual)
-echo 4. Auditoria das pastas da configuracao manual
-echo 5. Backup das pastas da configuracao manual
-echo 6. Abrir guia rapido de uso
-echo 7. Editar configuracao manual existente
-echo 8. Mapa opcional de pastas (Python; somente leitura)
-echo 0. Sair
-choice /c 123456780 /n /m "Opcao: "
-if errorlevel 9 exit /b 0
-if errorlevel 8 goto catalogo
-if errorlevel 7 goto editar
-if errorlevel 6 goto docs
-if errorlevel 5 goto manualbackup
-if errorlevel 4 goto manualaudit
-if errorlevel 3 goto setup
-if errorlevel 2 goto backup
-call :executar_backup -Mode Audit -AutoDiscover -SelectDestination -OpenReport
-set "BACKUP_EXIT=%ERRORLEVEL%"
-goto resultado
-:backup
-echo Use a mesma pasta de destino da auditoria automatica revisada.
-call :executar_backup -Mode Backup -AutoDiscover -SelectDestination -OpenReport
-set "BACKUP_EXIT=%ERRORLEVEL%"
-goto resultado
-:setup
-call :executar_backup -Setup
-set "BACKUP_EXIT=%ERRORLEVEL%"
-goto resultado
-:manualaudit
-call :executar_backup -Mode Audit -SelectDestination -OpenReport
-set "BACKUP_EXIT=%ERRORLEVEL%"
-goto resultado
-:manualbackup
-call :executar_backup -Mode Backup -SelectDestination -OpenReport
-set "BACKUP_EXIT=%ERRORLEVEL%"
-goto resultado
-:docs
-if exist "%~dp0docs\GUIA-RAPIDO.md" (
-    start "" notepad.exe "%~dp0docs\GUIA-RAPIDO.md"
-) else (
-    start "" "https://github.com/eduardoapgomes/windows-backup-audit#readme"
-)
-goto menu
-:catalogo
-if not exist "%~dp0Organizar.ps1" (
-    echo ERRO: Organizar.ps1 nao foi encontrado na pasta do menu.
-    echo Extraia ou restaure o projeto completo.
-    pause
-    goto menu
-)
-start "Mapa dos arquivos" powershell.exe -NoProfile -STA -NoExit -File "%~dp0Organizar.ps1" -Watch
-goto menu
-:editar
-if not exist "%~dp0backup.local.json" goto ausente
-notepad.exe "%~dp0backup.local.json"
-goto menu
-:ausente
-echo Use a opcao 3 para criar sua configuracao manual.
-pause
-goto menu
-:resultado
-if "%BACKUP_EXIT%"=="0" (
-    echo Comando executado sem erro reportado. Confira a configuracao ou o relatorio.
-) else (
+if not exist "%PASTA%configuracao.txt" (
+    echo   PRIMEIRO USO: conecte o HD externo e escolha 4 - Configurar.
     echo.
-    echo FALHA: a operacao nao foi concluida. Codigo de saida: %BACKUP_EXIT%.
-    echo Leia a mensagem acima. Se houver relatorio, confira as pendencias.
 )
+echo   1. Fazer backup agora
+echo   2. Simular  (mostra o que sera copiado, nao grava nada)
+echo   3. Verificar integridade do backup  (rele o HD)
+echo   4. Configurar pastas e HD de destino
+echo   5. Agendar backup automatico
+echo   6. Abrir o ultimo relatorio
+echo   7. Guia rapido
+echo   0. Sair
+echo.
+choice /c 12345670 /n /m "Escolha uma opcao: "
+set "OPCAO=%ERRORLEVEL%"
+if "%OPCAO%"=="8" exit /b 0
+if "%OPCAO%"=="7" goto guia
+if "%OPCAO%"=="1" call :executar -Acao Backup
+if "%OPCAO%"=="2" call :executar -Acao Simular
+if "%OPCAO%"=="3" call :executar -Acao Verificar
+if "%OPCAO%"=="4" call :executar -Acao Configurar
+if "%OPCAO%"=="5" call :executar -Acao Agendar
+if "%OPCAO%"=="6" call :executar -Acao Relatorio
+echo.
+if "%SAIDA%"=="0" echo   Concluido.
+if "%SAIDA%"=="1" echo   AVISO: concluido com avisos. Veja o relatorio.
+if "%SAIDA%"=="2" echo   ATENCAO: ha erros ou a execucao foi interrompida. Veja o relatorio.
+if "%SAIDA%"=="3" echo   NAO EXECUTADO: leia a mensagem acima. Nada foi copiado.
+echo.
 pause
 goto menu
 
-:executar_backup
-if not exist "%~dp0Backup.ps1" (
-    echo.
-    echo ERRO: Backup.ps1 nao foi encontrado na mesma pasta que Iniciar.cmd.
-    echo Pasta do programa: "%~dp0"
-    echo Extraia o ZIP completo ou restaure os arquivos do repositorio Git.
-    echo Nenhuma configuracao, auditoria ou copia foi iniciada.
-    exit /b 2
+:guia
+if exist "%PASTA%docs\GUIA-RAPIDO.md" (
+    start "" notepad.exe "%PASTA%docs\GUIA-RAPIDO.md"
+) else (
+    start "" "https://github.com/eduardoapgomes/windows-backup-audit/blob/main/docs/GUIA-RAPIDO.md"
 )
-if not exist "%~dp0src\Backup.Core.psm1" (
-    echo.
-    echo ERRO: src\Backup.Core.psm1 nao foi encontrado.
-    echo O projeto esta incompleto. Extraia ou restaure a pasta src.
-    echo Nenhuma configuracao, auditoria ou copia foi iniciada.
-    exit /b 2
+goto menu
+
+:executar
+set "SAIDA=3"
+for %%F in ("Backup.ps1" "src\Backup.Core.psm1" "src\Nativo.cs") do (
+    if not exist "%PASTA%%%~F" (
+        echo.
+        echo   ERRO: o arquivo %%~F nao foi encontrado em "%PASTA%".
+        echo   A instalacao esta incompleta. Extraia o ZIP inteiro em uma pasta nova
+        echo   ou use Atualizar.cmd. Veja docs\ATUALIZAR.md. Nada foi feito.
+        exit /b 3
+    )
 )
-powershell.exe -NoProfile -STA -File "%~dp0Backup.ps1" %*
-exit /b %ERRORLEVEL%
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%PASTA%Backup.ps1" %*
+set "SAIDA=%ERRORLEVEL%"
+exit /b %SAIDA%

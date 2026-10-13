@@ -1,384 +1,663 @@
 ﻿#Requires -Version 5.1
+# =============================================================================
+# windows-backup-audit - núcleo
+#
+# Fluxo de um backup (detalhes em docs\COMO-FUNCIONA.md):
+#   1. Confere o HD de destino (USB, NTFS, outro disco físico) e trava o backup.
+#   2. Lista origem e destino (só metadados) e compara com o manifesto.
+#   3. Pasta renomeada/movida: move a cópia no HD em vez de copiar de novo.
+#   4. Arquivo alterado: a versão antiga vai para _VERSOES_ANTERIORES (nunca é apagada).
+#   5. Robocopy copia SOMENTE arquivos ausentes no destino (/XC /XN /XO: nunca sobrescreve).
+#   6. Cada arquivo copiado é conferido por SHA-256 (origem e cópia) e entra no manifesto.
+#   7. Relatório em _CONTROLE\execucoes\<data>\RELATORIO.html.
+# Nada é apagado: nem na origem, nem no backup.
+# =============================================================================
 Set-StrictMode -Version Latest
-. "$PSScriptRoot\Backup.Html.ps1"
-. "$PSScriptRoot\Backup.Review.ps1"
-. "$PSScriptRoot\Backup.Cloud.ps1"
-. "$PSScriptRoot\Backup.Storage.ps1"
-. "$PSScriptRoot\Backup.Setup.ps1"
-. "$PSScriptRoot\Backup.Partial.ps1"
-. "$PSScriptRoot\Backup.Progress.ps1"
-. "$PSScriptRoot\Backup.Discovery.ps1"
-. "$PSScriptRoot\Backup.Policy.ps1"
-. "$PSScriptRoot\Backup.Merkle.ps1"
 
-function Test-PathWithin {
-    param([string]$Path, [string]$Root)
-    $p = [IO.Path]::GetFullPath($Path).TrimEnd('\','/')
-    $r = [IO.Path]::GetFullPath($Root).TrimEnd('\','/')
-    return $p.Equals($r, [StringComparison]::OrdinalIgnoreCase) -or
-        $p.StartsWith($r + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)
+if (-not ('WindowsBackupAudit.Nativo' -as [type])) {
+    $codigo = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'Nativo.cs'), [Text.Encoding]::UTF8)
+    Add-Type -TypeDefinition $codigo -Language CSharp -IgnoreWarnings
+}
+foreach ($parte in 'Config.ps1', 'Destino.ps1', 'Relatorio.ps1', 'Agendamento.ps1', 'Assistente.ps1') {
+    . (Join-Path $PSScriptRoot $parte)
 }
 
-function Get-BackupFiles {
-    param([string]$Root, [switch]$ExistingBackup, [string[]]$ExcludedPaths=@(),
-        [Collections.Generic.List[object]]$Issues,
-        [ValidateSet('Auto','Exclude','Include')][string]$DependencyPolicy='Include',
-        [Collections.Generic.List[object]]$Dependencies, [string]$OwnerId='', [string]$OwnerRoot='')
-    Assert-PlainPath $Root -AllowCloudSource:(-not $ExistingBackup)
-    $stack = New-Object 'Collections.Generic.Stack[string]'
-    $stack.Push($Root)
-    while ($stack.Count) {
-        $directory = $stack.Pop()
-        Show-BackupProgress -Phase 'Enumerando pastas' -Path $directory
-        try {
-            Assert-PlainPath $directory -AllowCloudSource:(-not $ExistingBackup)
-            if ($DependencyPolicy -ne 'Include') {
-                $decision=Get-DependencyFolder $directory
-                if ($null -ne $decision) {
-                    $decision.OwnerId=$OwnerId; $decision.OwnerRoot=$OwnerRoot
-                    $decision.Decision=if ($ExistingBackup) {'INDEX_NOT_SCANNED'} elseif ($DependencyPolicy -eq 'Exclude') {'EXCLUDED_BY_POLICY'} else {'DEFERRED'}
-                    if ($null -ne $Dependencies) { $Dependencies.Add($decision) }
-                    Save-BackupDecisions
-                    continue
-                }
-            }
-            $items = @(Get-ChildItem -LiteralPath $directory -Force -ErrorAction Stop)
-        } catch {
-            if ($ExistingBackup -or $null -eq $Issues) { throw }
-            $Issues.Add([pscustomobject]@{Path=$directory;Status='ERROR';Reason=$_.Exception.Message})
-            continue
+$script:Versao = '2.0.0'
+$script:MinimoMovido = 64KB      # arquivos menores são simplesmente copiados de novo
+$script:LimiteGrande = 8MB       # arquivos grandes são conferidos um por vez (evita disputa no HD)
+$script:MargemEspaco = 1GB
+
+# ------------------------------------------------------------------ utilidades
+function Write-Etapa {
+    param([string]$Texto, [ConsoleColor]$Cor = [ConsoleColor]::Gray)
+    Write-Host ('[{0:HH:mm:ss}] {1}' -f (Get-Date), $Texto) -ForegroundColor $Cor
+}
+
+function Format-Tamanho {
+    param([double]$Bytes)
+    if ($Bytes -ge 1TB) { return '{0:N2} TB' -f ($Bytes / 1TB) }
+    if ($Bytes -ge 1GB) { return '{0:N2} GB' -f ($Bytes / 1GB) }
+    if ($Bytes -ge 1MB) { return '{0:N1} MB' -f ($Bytes / 1MB) }
+    if ($Bytes -ge 1KB) { return '{0:N0} KB' -f ($Bytes / 1KB) }
+    return '{0:N0} bytes' -f $Bytes
+}
+
+function Format-Argumento {
+    # Aspas para argumentos com espaço; barras antes da aspa final são duplicadas.
+    param([string]$Valor)
+    if ($Valor -notmatch '[\s"]') { return $Valor }
+    return '"' + ($Valor -replace '(\\+)$', '$1$1') + '"'
+}
+
+function Get-Carimbo {
+    # Nome da pasta da execução (data e hora). Único mesmo com duas execuções no mesmo segundo.
+    param([string]$Controle = '', [string]$Sufixo = '')
+    $base = (Get-Date).ToString('yyyy-MM-dd_HH-mm-ss')
+    $carimbo = $base + $Sufixo
+    $n = 2
+    while ($Controle -and (Test-Path -LiteralPath (Join-Path (Join-Path $Controle 'execucoes') $carimbo))) { $carimbo = "$base-$n$Sufixo"; $n++ }
+    return $carimbo
+}
+
+function New-Detalhes {
+    # Lista de arquivos tratados, separada por tabulação (abre no Excel com acentos).
+    param([Parameter(Mandatory)][string]$Caminho)
+    $w = New-Object IO.StreamWriter($Caminho, $false, (New-Object Text.UTF8Encoding($true)))
+    $w.WriteLine("situacao`tpasta`tcaminho`tbytes`tsha256`tmensagem")
+    return $w
+}
+
+function Add-Detalhe {
+    param($Escritor, [string]$Situacao, [string]$Pasta, [string]$Caminho, [long]$Bytes = 0, [string]$Sha = '', [string]$Mensagem = '')
+    if ($null -eq $Escritor) { return }
+    if ($Caminho -match '^[=+\-@]') { $Caminho = "'" + $Caminho }   # evita fórmula no Excel
+    $Escritor.WriteLine(($Situacao, $Pasta, $Caminho, $Bytes, $Sha, ($Mensagem -replace '[\t\r\n]+', ' ')) -join "`t")
+}
+
+function Open-Trava {
+    param([Parameter(Mandatory)][string]$Destino)
+    $caminho = Join-Path $Destino '.backup.lock'
+    try { return [IO.File]::Open($caminho, 'OpenOrCreate', 'ReadWrite', 'None') }
+    catch { throw 'Outro backup ou verificação está usando este HD agora. Feche a outra janela e tente de novo.' }
+}
+
+function Assert-MesmoDisco {
+    # Antes de gravar: o HD ainda é o mesmo (não foi trocado nem desconectado)?
+    param([string]$Destino, [string[]]$Origens, $Disco)
+    Clear-CacheDisco
+    $agora = Assert-DestinoSeguro $Destino $Origens
+    if ($agora.DiscoId -ne $Disco.DiscoId) { throw 'O HD de destino foi trocado ou desconectado durante a execução.' }
+}
+
+function Get-LivreDestino {
+    param([string]$Destino)
+    return (New-Object IO.DriveInfo ([IO.Path]::GetPathRoot($Destino))).AvailableFreeSpace
+}
+
+function Write-LeiaMeDestino {
+    param([string]$Destino)
+    $caminho = Join-Path $Destino 'LEIA-ME.txt'
+    if (Test-Path -LiteralPath $caminho) { return }
+    $texto = @"
+BACKUP FEITO PELO WINDOWS BACKUP AUDIT
+https://github.com/eduardoapgomes/windows-backup-audit
+
+Cada pasta aqui é uma cópia comum de uma pasta do computador. Para restaurar,
+basta copiar os arquivos de volta (Explorador de Arquivos) ou seguir
+docs\RESTAURAR.md. Não é preciso instalar nada para ler este backup.
+
+_CONTROLE               manifestos (SHA-256 de cada arquivo) e relatórios de cada execução
+_VERSOES_ANTERIORES     versões antigas de arquivos que mudaram depois (por data da execução)
+
+O programa nunca apaga arquivos deste HD. Para liberar espaço, você pode apagar
+pastas antigas dentro de _VERSOES_ANTERIORES. Não edite os arquivos de _CONTROLE.
+"@
+    [IO.File]::WriteAllText($caminho, $texto.Replace("`n", "`r`n").Replace("`r`r", "`r"), (New-Object Text.UTF8Encoding($true)))
+}
+
+function Move-PastasVersaoAnterior {
+    # A versão 1 (descoberta automática) chamava as pastas de AUTO_<código>. Renomeia para
+    # o nome novo, no próprio HD: nada é recopiado e os arquivos são conferidos por SHA-256.
+    param([object[]]$Origens, [string]$Destino)
+    foreach ($o in $Origens) {
+        $novo = Join-Path $Destino $o.Nome
+        if (Test-Path -LiteralPath $novo) { continue }
+        $antigo = Join-Path $Destino (Get-IdVersaoAnterior $o.Caminho)
+        if (Test-Path -LiteralPath $antigo -PathType Container) {
+            [IO.Directory]::Move($antigo, $novo)
+            Write-Etapa "Pasta da versão anterior renomeada no HD: $(Split-Path -Leaf $antigo) -> $($o.Nome)"
         }
-        $directories=New-Object 'Collections.Generic.List[string]'
-        foreach ($item in $items) {
-            if (@($ExcludedPaths | Where-Object { Test-PathWithin $item.FullName $_ }).Count) { continue }
-            if ($ExistingBackup -and ($item.Name -eq '_RELATORIOS' -or $item.Name -eq '.backup.lock' -or
-                $item.Name -like '.stage-*' -or $item.Name -like '.history-*')) { continue }
-            try {
-                if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
-                    Assert-PlainPath $item.FullName -AllowCloudSource:(-not $ExistingBackup)
-                }
-                if ($item.PSIsContainer) { $directories.Add($item.FullName) } else { $item }
-            } catch {
-                if ($ExistingBackup -or $null -eq $Issues) { throw }
-                $Issues.Add([pscustomobject]@{Path=$item.FullName;Status='ERROR';Reason=$_.Exception.Message})
-            }
-        }
-        # LIFO: push lower-priority directories first so personal folders run first.
-        foreach ($child in ($directories | Sort-Object @{Expression={Get-DirectoryPriority $_};Descending=$true}, @{Expression={$_};Descending=$true})) { $stack.Push($child) }
     }
 }
 
-function Get-BackupHash {
-    param([string]$Path, [switch]$Source)
-    if ($Source) { Assert-SourceFileAvailable $Path } else { Assert-PlainPath $Path }
-    $stream = [IO.File]::Open($Path, 'Open', 'Read', 'Read')
-    $sha = [Security.Cryptography.SHA256]::Create()
-    $timer = [Diagnostics.Stopwatch]::StartNew()
+# ------------------------------------------------------------------ Robocopy
+function Invoke-Robocopy {
+    # Copia somente arquivos que NÃO existem no destino. /XC /XN /XO impedem sobrescrever.
+    # /XA:O ignora arquivos só na nuvem (não baixa o OneDrive inteiro).
+    # Não usa /MIR nem /PURGE: nada é apagado no destino.
+    param(
+        [Parameter(Mandatory)][string]$Origem,
+        [Parameter(Mandatory)][string]$Destino,
+        [string[]]$ExcluirPastas = @(),
+        [string[]]$ExcluirArquivos = @(),
+        [Parameter(Mandatory)][string]$Log,
+        [int]$Threads = 8,
+        [long]$BytesPrevistos = 0,
+        [string]$Rotulo = ''
+    )
+    $argumentos = New-Object 'Collections.Generic.List[string]'
+    foreach ($a in @($Origem, $Destino, '/E', '/COPY:DAT', '/DCOPY:DAT', '/XC', '/XN', '/XO', '/XA:O',
+            '/R:2', '/W:5', "/MT:$Threads", '/NP', '/NDL', '/FP', "/UNILOG:$Log")) { $argumentos.Add($a) }
+    if ($ExcluirPastas.Count) { $argumentos.Add('/XD'); foreach ($x in $ExcluirPastas) { $argumentos.Add($x) } }
+    if ($ExcluirArquivos.Count) { $argumentos.Add('/XF'); foreach ($x in $ExcluirArquivos) { $argumentos.Add($x) } }
+    $linha = (@($argumentos | ForEach-Object { Format-Argumento $_ })) -join ' '
+    if ($linha.Length -gt 32000) {
+        throw 'Há links ou exclusões demais nesta pasta para o Robocopy. Exclua a pasta problemática em [EXCLUIR_PASTAS].'
+    }
+    $info = New-Object Diagnostics.ProcessStartInfo
+    $info.FileName = 'robocopy.exe'
+    $info.Arguments = $linha
+    $info.UseShellExecute = $false
+    $info.CreateNoWindow = $true
+    $livreAntes = Get-LivreDestino $Destino
+    $inicio = Get-Date
+    $atividade = "Copiando $Rotulo"
+    $processo = [Diagnostics.Process]::Start($info)
     try {
-        $buffer = New-Object byte[] ([int][Math]::Max(1, [Math]::Min(4MB, $stream.Length)))
-        $readTotal = [long]0
-        Show-BackupProgress -Phase 'Calculando SHA-256' -Path $Path -TotalBytes $stream.Length
-        while (($read = $stream.Read($buffer, 0, $buffer.Length)) -gt 0) {
-            $null = $sha.TransformBlock($buffer, 0, $read, $buffer, 0)
-            $readTotal += $read
-            Show-BackupProgress -Phase 'Calculando SHA-256' -Path $Path -ReadBytes $readTotal -TotalBytes $stream.Length
+        while (-not $processo.WaitForExit(1000)) {
+            $feito = [math]::Max(0, $livreAntes - (Get-LivreDestino $Destino))
+            $segundos = [math]::Max(1, ((Get-Date) - $inicio).TotalSeconds)
+            $status = '{0} de {1} - {2}/s' -f (Format-Tamanho $feito), (Format-Tamanho $BytesPrevistos), (Format-Tamanho ($feito / $segundos))
+            $pct = if ($BytesPrevistos -gt 0) { [int][math]::Min(99, 100.0 * $feito / $BytesPrevistos) } else { -1 }
+            Write-Progress -Id 1 -Activity $atividade -Status $status -PercentComplete $pct
         }
-        $null = $sha.TransformFinalBlock($buffer, 0, 0)
-        Show-BackupProgress -Phase 'Calculando SHA-256' -Path $Path -ReadBytes $readTotal -TotalBytes $stream.Length -FileCompleted
-        return [BitConverter]::ToString($sha.Hash).Replace('-','')
-    }
-    finally {
-        $timer.Stop()
-        if ($null -ne $script:BackupProgress) { $script:BackupProgress.HashSeconds += $timer.Elapsed.TotalSeconds }
-        $sha.Dispose(); $stream.Dispose()
-    }
-}
-
-function Copy-VerifiedFile {
-    param([string]$Source, [string]$Destination, [string]$Log, [object]$ExpectedIdentity)
-    $identity = Assert-ExternalDestination $Destination @($Source) $ExpectedIdentity
-    Assert-PlainPath $Log
-    $logIdentity = Assert-ExternalDestination $Log @($Source) $identity
-    $null = $logIdentity
-    # A read-only shared handle prevents writers/deletion during copy and verification.
-    Assert-SourceFileAvailable $Source
-    $sourceLock = [IO.File]::Open($Source, 'Open', 'Read', 'Read')
-    $stage = $null
-    try {
-        $before = Get-BackupHash $Source -Source
-        if (Test-Path -LiteralPath $Destination) {
-            if ((Get-BackupHash $Destination) -eq $before) { return 'SKIP_IDENTICAL' }
-        }
-        $length = (Get-Item -LiteralPath $Source -ErrorAction Stop).Length
-        if ($identity.FreeBytes -lt ($length + 16MB)) { throw 'Espaço insuficiente para staging e margem de segurança.' }
-        $parent = Split-Path -Parent $Destination
-        $null = Assert-ExternalDestination $parent @($Source) $identity
-        New-Item -ItemType Directory -Path $parent -Force -ErrorAction Stop | Out-Null
-        $stage = Join-Path $parent ('.stage-' + [guid]::NewGuid().ToString('N'))
-        New-Item -ItemType Directory -Path $stage -ErrorAction Stop | Out-Null
-        $arguments = @((Split-Path -Parent $Source), $stage, (Split-Path -Leaf $Source),
-            '/COPY:DAT', '/Z', '/XJ', '/R:2', '/W:2', '/IS', '/IT', '/TEE', "/LOG+:$Log")
-        Show-BackupProgress -Phase 'Copiando com Robocopy' -Path $Source
-        & robocopy.exe @arguments | Out-Host
-        if ($LASTEXITCODE -ge 8) { throw "Robocopy: $LASTEXITCODE" }
-        $temporary = Join-Path $stage (Split-Path -Leaf $Source)
-        if ((Get-BackupHash $temporary) -ne $before -or (Get-BackupHash $Source -Source) -ne $before) {
-            throw 'Conteúdo mudou ou verificação falhou; destino anterior preservado.'
-        }
-        $null = Assert-ExternalDestination $Destination @($Source) $identity
-        if (Test-Path -LiteralPath $Destination) {
-            $history = Join-Path $parent ('.history-' + [guid]::NewGuid().ToString('N'))
-            [IO.File]::Replace($temporary, $Destination, $history)
-        } else { [IO.File]::Move($temporary, $Destination) }
-        return 'VERIFIED'
+        $processo.WaitForExit()
+        return $processo.ExitCode
     } finally {
-        $sourceLock.Dispose()
-        if ($stage) {
-            # A changed disk must never receive cleanup writes.
-            $null = Assert-ExternalDestination $stage @($Source) $identity
-            Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction Stop
-        }
+        if (-not $processo.HasExited) { try { $processo.Kill() } catch { Write-Verbose 'Robocopy já encerrado.' } }
+        Write-Progress -Id 1 -Activity $atividade -Completed
+        $processo.Dispose()
     }
 }
 
-function Get-ExistingBackupIndex {
-    param([string]$Destination, [string]$DependencyPolicy='Include', [Collections.Generic.List[object]]$Dependencies)
-    $index = @{}
-    if (Test-Path -LiteralPath $Destination) {
-        Get-BackupFiles $Destination -ExistingBackup -DependencyPolicy $DependencyPolicy -Dependencies $Dependencies | ForEach-Object {
-            $key = '@size|' + ([string]$_.Length)
-            if ($null -ne $script:BackupProgress) { $script:BackupProgress.DestinationIndexedFiles++ }
-            if (-not $index.ContainsKey($key)) { $index[$key] = New-Object 'Collections.Generic.List[string]' }
-            $index[$key].Add($_.FullName)
-        }
-    }
-    return $index
+# ------------------------------------------------------------------ verificação
+function Save-Manifesto {
+    param($Ctx)
+    $pasta = Split-Path -Parent $Ctx.CaminhoManifesto
+    if (-not (Test-Path -LiteralPath $pasta)) { New-Item -ItemType Directory -Path $pasta -Force | Out-Null }
+    [WindowsBackupAudit.Nativo]::GravarManifesto($Ctx.CaminhoManifesto, $Ctx.Manifesto)
+    $Ctx.UltimoSalvo = Get-Date
 }
 
-function Find-ExistingContent {
-    param([string]$SourceHash, [long]$Length, [hashtable]$Index)
-    $pending = '@size|' + ([string]$Length)
-    if ($Index.ContainsKey($pending)) {
-        # Resolve only lengths requested by a source; unrelated destination contents stay unread.
-        foreach ($candidate in $Index[$pending]) {
-            Assert-PlainPath $candidate
-            if ((Get-Item -LiteralPath $candidate -ErrorAction Stop).Length -ne $Length) { continue }
-            $candidateHash = Get-BackupHash $candidate
-            $candidateKey = ([string]$Length) + '|' + $candidateHash
-            if (-not $Index.ContainsKey($candidateKey)) { $Index[$candidateKey] = New-Object 'Collections.Generic.List[string]' }
-            $Index[$candidateKey].Add($candidate)
-            if ($null -ne $script:BackupProgress) { $script:BackupProgress.DestinationHashCandidates++ }
-        }
-        $Index.Remove($pending)
-        if ($null -ne $script:BackupProgress) { $script:BackupProgress.SizeBucketsResolved++ }
-    }
-    $key = ([string]$Length) + '|' + $SourceHash
-    if ($Index.ContainsKey($key)) {
-        foreach ($candidate in $Index[$key]) {
-            # Rehash candidates on every decision; no trusted stale hash cache.
-            if ((Get-BackupHash $candidate) -eq $SourceHash) { return $candidate }
+function New-Lotes {
+    # Arquivos pequenos: 64 por lote, 4 em paralelo. Grandes: um por vez.
+    param([object[]]$Itens, [scriptblock]$Tamanho)
+    $lotes = New-Object 'Collections.Generic.List[object]'
+    $atual = New-Object 'Collections.Generic.List[object]'
+    foreach ($i in $Itens) {
+        if ((& $Tamanho $i) -ge $script:LimiteGrande) {
+            if ($atual.Count) { $lotes.Add([pscustomobject]@{ Itens = $atual.ToArray(); Paralelo = 4 }); $atual = New-Object 'Collections.Generic.List[object]' }
+            $lotes.Add([pscustomobject]@{ Itens = @($i); Paralelo = 1 })
+        } else {
+            $atual.Add($i)
+            if ($atual.Count -ge 64) { $lotes.Add([pscustomobject]@{ Itens = $atual.ToArray(); Paralelo = 4 }); $atual = New-Object 'Collections.Generic.List[object]' }
         }
     }
-    return $null
+    if ($atual.Count) { $lotes.Add([pscustomobject]@{ Itens = $atual.ToArray(); Paralelo = 4 }) }
+    return , $lotes.ToArray()
 }
 
-function Invoke-BackupPlan {
-    param([object[]]$Sources, [string]$Destination, [ValidateSet('Audit','Backup')][string]$Mode = 'Audit',
-        [object[]]$Discovery=@(), [string[]]$ExcludedPaths=@(), [string]$Scope='Configuração manual', [switch]$OpenReport,
-        [ValidateSet('Auto','Exclude','Include')][string]$DependencyPolicy='Auto', [switch]$QuickAudit)
-    Assert-BackupDependencies -Mode $Mode
-    if (-not $Sources -or $Sources.Count -eq 0) { throw 'Configure pelo menos uma origem.' }
-    $sourcePaths = @($Sources | ForEach-Object { [string]$_.Path })
-    $identity = Assert-ExternalDestination $Destination $sourcePaths
-    $destinationPath = [IO.Path]::GetFullPath($Destination).TrimEnd('\')
-    if ($destinationPath -eq $identity.Drive.TrimEnd('\')) { throw 'Escolha uma pasta de backup, não a raiz do disco.' }
-    $ids = New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
-    foreach ($source in $Sources) {
-        if ($source.Id -notmatch '^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$' -or
-            $source.Id -match '^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$' -or -not $ids.Add($source.Id)) {
-            throw 'Id inválido/reservado ou repetido; use letras e números no início, depois _ ou -.'
+function Invoke-VerificacaoArquivos {
+    # Confere cada arquivo (SHA-256 da origem e da cópia, lidos ao mesmo tempo) e registra
+    # no manifesto. Salva o manifesto a cada minuto: se a energia cair, o que já foi
+    # conferido não precisa ser lido de novo.
+    param($Ctx, [object[]]$Arquivos, [string]$EstadoOk, $Detalhes, [switch]$DevolverDivergentes, [string]$Atividade = 'Conferindo')
+    $divergentes = New-Object 'Collections.Generic.List[object]'
+    if (-not $Arquivos -or $Arquivos.Count -eq 0) { return , $divergentes.ToArray() }
+    $totalBytes = [long]0
+    foreach ($a in $Arquivos) { $totalBytes += $a.Bytes }
+    $feitos = 0
+    $bytesFeitos = [long]0
+    $inicio = Get-Date
+    foreach ($lote in (New-Lotes $Arquivos { param($x) $x.Bytes })) {
+        $n = $lote.Itens.Count
+        $origens = New-Object 'string[]' $n
+        $destinos = New-Object 'string[]' $n
+        for ($i = 0; $i -lt $n; $i++) {
+            $origens[$i] = [IO.Path]::Combine($Ctx.Origem.Caminho, $lote.Itens[$i].Relativo)
+            $destinos[$i] = [IO.Path]::Combine($Ctx.PastaDestino, $lote.Itens[$i].Relativo)
         }
-        Assert-PlainPath $source.Path -AllowCloudSource
-        if (-not (Test-Path -LiteralPath $source.Path -PathType Container)) { throw "Origem ausente: $($source.Path)" }
-        if ((Test-PathWithin $destinationPath $source.Path) -or (Test-PathWithin $source.Path $destinationPath)) {
-            throw 'Origem e destino precisam ser árvores independentes.'
+        $resultados = [WindowsBackupAudit.Nativo]::VerificarLote($origens, $destinos, $lote.Paralelo)
+        $agora = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')
+        for ($i = 0; $i -lt $n; $i++) {
+            $a = $lote.Itens[$i]
+            $r = $resultados[$i]
+            $feitos++
+            $bytesFeitos += $a.Bytes
+            if ($r.Ok) {
+                $reg = New-Object WindowsBackupAudit.Registro
+                $reg.Relativo = $a.Relativo
+                $reg.Bytes = $r.Bytes
+                $reg.Modificado = $r.Modificado
+                $reg.Sha256 = $r.HashOrigem
+                $reg.Verificado = $agora
+                $Ctx.Manifesto.Registros[$a.Relativo] = $reg
+                $a.Estado = $EstadoOk
+                $a.Sha256 = $r.HashOrigem
+                $a.Bytes = $r.Bytes
+                $a.Modificado = $r.Modificado
+                Add-Detalhe $Detalhes $EstadoOk $Ctx.Origem.Nome $a.Relativo $a.Bytes $a.Sha256
+            } elseif ($DevolverDivergentes -and $r.ConteudoDiferente) {
+                $divergentes.Add($a)
+            } else {
+                $a.Estado = 'ERRO'
+                $a.Mensagem = $r.Erro
+                Add-Detalhe $Detalhes 'ERRO' $Ctx.Origem.Nome $a.Relativo $a.Bytes '' $r.Erro
+            }
+        }
+        $segundos = [math]::Max(1, ((Get-Date) - $inicio).TotalSeconds)
+        $pct = if ($totalBytes -gt 0) { [int](100.0 * $bytesFeitos / $totalBytes) } else { [int](100.0 * $feitos / $Arquivos.Count) }
+        Write-Progress -Id 2 -Activity "$Atividade $($Ctx.Origem.Nome) (SHA-256)" -PercentComplete ([math]::Min(100, $pct)) `
+            -Status ('{0} de {1} arquivos - {2} de {3} - {4}/s' -f $feitos, $Arquivos.Count, (Format-Tamanho $bytesFeitos), (Format-Tamanho $totalBytes), (Format-Tamanho ($bytesFeitos / $segundos)))
+        if (((Get-Date) - $Ctx.UltimoSalvo).TotalSeconds -ge 60) { Save-Manifesto $Ctx }
+    }
+    Write-Progress -Id 2 -Activity "$Atividade $($Ctx.Origem.Nome) (SHA-256)" -Completed
+    return , $divergentes.ToArray()
+}
+
+# ------------------------------------------------------------------ resumo
+function Get-ContagemOrigem {
+    param($Ctx)
+    $p = $Ctx.Plano
+    $c = [ordered]@{
+        Nome = $p.Nome; Origem = $Ctx.Origem.Caminho
+        Arquivos = $p.Origem.Arquivos.Count + $p.Origem.SomenteNuvem.Count; Bytes = $p.Origem.Bytes
+        SemMudanca = $p.SemMudanca; Copiados = 0; Atualizados = 0; Movidos = 0; Conferidos = 0
+        BytesCopiados = [long]0; Nuvem = $p.Nuvem.Count; Links = $p.Origem.Links.Count
+        Erros = $p.Origem.Erros.Count; Pendentes = 0
+        PlanoNovos = $p.Novos.Count; PlanoBytesNovos = [long]0; PlanoAlterados = $p.Alterados.Count
+        PlanoBytesAlterados = [long]0; PlanoConferir = $p.Conferir.Count; PlanoMovidos = 0
+    }
+    foreach ($a in $p.Novos) { $c.PlanoBytesNovos += $a.Bytes }
+    foreach ($a in $p.Alterados) { $c.PlanoBytesAlterados += $a.Bytes }
+    foreach ($lista in @($p.Novos, $p.Alterados, $p.Conferir)) {
+        foreach ($a in $lista) {
+            switch ($a.Estado) {
+                'COPIADO' { $c.Copiados++; $c.BytesCopiados += $a.Bytes }
+                'ATUALIZADO' { $c.Atualizados++; $c.BytesCopiados += $a.Bytes }
+                'MOVIDO' { $c.Movidos++ }
+                'CONFERIDO' { $c.Conferidos++ }
+                'ERRO' { $c.Erros++ }
+                default { $c.Pendentes++ }
+            }
         }
     }
-    $null = Assert-ExternalDestination $destinationPath $sourcePaths $identity
-    New-Item -ItemType Directory -Path $destinationPath -Force -ErrorAction Stop | Out-Null
-    $lockPath = Join-Path $destinationPath '.backup.lock'
-    Assert-PlainPath $lockPath
-    $lock = [IO.File]::Open($lockPath, 'OpenOrCreate', 'ReadWrite', 'None')
-    Start-BackupProgress $Mode
+    return [pscustomobject]$c
+}
+
+function Show-Plano {
+    param([object[]]$Contextos, [object[]]$Movimentos)
+    $movidosPor = @{}
+    foreach ($m in $Movimentos) { $movidosPor[$m.PlanoNovo.Nome] = 1 + [int]$movidosPor[$m.PlanoNovo.Nome] }
+    Write-Host ''
+    Write-Host 'PLANO' -ForegroundColor Cyan
+    foreach ($ctx in $Contextos) {
+        $c = Get-ContagemOrigem $ctx
+        $mov = [int]$movidosPor[$c.Nome]
+        Write-Host ('  {0,-24} {1,9:N0} arquivos ({2})' -f $c.Nome, $c.Arquivos, (Format-Tamanho $c.Bytes))
+        Write-Host ('      novos: {0:N0} ({1})  alterados: {2:N0} ({3})  movidos: {4:N0}  conferir: {5:N0}  sem mudança: {6:N0}' -f `
+            ($c.PlanoNovos - $mov), (Format-Tamanho $c.PlanoBytesNovos), $c.PlanoAlterados, (Format-Tamanho $c.PlanoBytesAlterados), $mov, $c.PlanoConferir, $c.SemMudanca)
+        if ($c.Nuvem -or $c.Links -or $c.Erros) {
+            Write-Host ('      só na nuvem: {0:N0}  links ignorados: {1:N0}  pastas ilegíveis: {2:N0}' -f $c.Nuvem, $c.Links, $c.Erros) -ForegroundColor Yellow
+        }
+    }
+    Write-Host ''
+}
+
+function Get-Situacao {
+    param([int]$Erros, [int]$Avisos, [bool]$Concluido)
+    if (-not $Concluido) { return [pscustomobject]@{ Situacao = 'INTERROMPIDO'; Codigo = 2 } }
+    if ($Erros) { return [pscustomobject]@{ Situacao = 'ERROS'; Codigo = 2 } }
+    if ($Avisos) { return [pscustomobject]@{ Situacao = 'AVISOS'; Codigo = 1 } }
+    return [pscustomobject]@{ Situacao = 'OK'; Codigo = 0 }
+}
+
+# ------------------------------------------------------------------ backup
+function Invoke-BackupWBA {
+    <#
+    .SYNOPSIS
+    Faz (ou simula) o backup das origens da configuração para o destino.
+    Devolve um resumo com CodigoSaida: 0 sem problemas, 1 avisos, 2 erros/interrompido.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Config,
+        [Parameter(Mandatory)][string]$Destino,
+        [ValidateSet('Backup', 'Simular')][string]$Modo = 'Backup',
+        [ValidateRange(1, 128)][int]$Threads = 8,
+        [string]$PastaSimulacao = ''
+    )
+    $inicio = Get-Date
+    $origens = @($Config.Origens)
+    $caminhosOrigem = [string[]]@($origens | ForEach-Object { $_.Caminho })
+    Clear-CacheDisco
+    $disco = Assert-DestinoSeguro $Destino $caminhosOrigem
+    $Destino = $Destino.TrimEnd('\', '/')
+    $filtro = [WindowsBackupAudit.Filtro]::new([string[]]$Config.ExcluirPastas, [string[]]$Config.ExcluirArquivos)
+    $controle = Join-Path $Destino '_CONTROLE'
+    $carimbo = Get-Carimbo -Controle $controle
+    $trava = $null; $detalhes = $null; $execucao = ''; $falha = ''; $concluido = $false
+    $contextos = New-Object 'Collections.Generic.List[object]'
+    $movimentos = @()
+    $resumo = $null
+
+    if ($Modo -eq 'Backup') {
+        if (-not (Test-Path -LiteralPath $Destino)) { New-Item -ItemType Directory -Path $Destino -Force | Out-Null }
+        $trava = Open-Trava $Destino
+    }
     try {
-        $run = Join-Path $destinationPath ('_RELATORIOS\' + [guid]::NewGuid().ToString('N'))
-        $null = Assert-ExternalDestination $run $sourcePaths $identity
-        New-Item -ItemType Directory -Path $run -Force -ErrorAction Stop | Out-Null
-        $seen = New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
-        $errors = @($Discovery | Where-Object Status -eq ERROR).Count
-        $issues = New-Object 'Collections.Generic.List[object]'
-        $dependencies=New-Object 'Collections.Generic.List[object]'
-        $indexSkipped=New-Object 'Collections.Generic.List[object]'
-        $csv = Join-Path $run 'inventario.csv'
-        $Discovery | Export-Csv -LiteralPath (Join-Path $run 'cobertura.csv') -NoTypeInformation -Encoding UTF8
-        [pscustomobject]@{Scope=$Scope;Sources=$Sources;ExcludedPaths=$ExcludedPaths;Discovery=$Discovery;DependencyPolicy=$DependencyPolicy;QuickAudit=[bool]$QuickAudit} |
-            ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $run 'plano.json') -Encoding UTF8
-        $script:BackupProgress.Run=$run
-        $script:BackupProgress.Identity=$identity
-        $script:BackupProgress.SourcePaths=$sourcePaths
-        $script:BackupProgress.EnumerationIssues=$issues
-        $script:BackupProgress.Dependencies=$dependencies
-        $script:BackupProgress.IndexSkipped=$indexSkipped
-        Write-Host "Acompanhamento parcial: $(Join-Path $run 'ANDAMENTO.html')"
-        Write-BackupPartial -Phase 'Iniciando comparação' -Path $destinationPath
-        if ($OpenReport) {
-            try { Start-Process -FilePath (Join-Path $run 'ANDAMENTO.html') }
-            catch { Write-Warning "Abra manualmente o acompanhamento em $run. O navegador não pôde ser iniciado." }
+        if ($Modo -eq 'Backup') {
+            Move-PastasVersaoAnterior $origens $Destino
+            $execucao = Join-Path (Join-Path $controle 'execucoes') $carimbo
+            New-Item -ItemType Directory -Path $execucao -Force | Out-Null
+            $detalhes = New-Detalhes (Join-Path $execucao 'detalhes.tsv')
+            Write-LeiaMeDestino $Destino
+        } else {
+            if (-not $PastaSimulacao) { $PastaSimulacao = [IO.Path]::GetTempPath() }
+            New-Item -ItemType Directory -Path $PastaSimulacao -Force | Out-Null
+            $execucao = $PastaSimulacao
+            $detalhes = New-Detalhes (Join-Path $PastaSimulacao "simulacao-$carimbo.tsv")
         }
-        Show-BackupProgress -Phase 'Indexando backup existente' -Path $destinationPath
-        # Enumerate the destination safely before copying; hash size-matched candidates on demand.
-        try { $index = Get-ExistingBackupIndex $destinationPath -DependencyPolicy $DependencyPolicy -Dependencies $indexSkipped }
-        catch {
-            $null = Assert-ExternalDestination $run $sourcePaths $identity
-            $_.Exception.Message | Set-Content -LiteralPath (Join-Path $run 'erros.txt') -Encoding UTF8
-            Write-BackupReview -Run $run -Sources $Sources -Mode $Mode -Errors 1
-            Write-BackupPartial -Phase 'Índice incompleto' -Finished
-            throw "Índice do backup incompleto; nenhuma cópia iniciada. Consulte $run"
+
+        # 1) Listar e comparar (só metadados: rápido, não lê o conteúdo dos arquivos).
+        foreach ($o in $origens) {
+            Write-Etapa "Listando $($o.Nome)  ($($o.Caminho))"
+            $vOrigem = [WindowsBackupAudit.Nativo]::Varrer($o.Caminho, $filtro, $true)
+            $pastaDestino = Join-Path $Destino $o.Nome
+            if (Test-Path -LiteralPath $pastaDestino -PathType Container) {
+                $vDestino = [WindowsBackupAudit.Nativo]::Varrer($pastaDestino, $filtro, $false)
+            } else { $vDestino = New-Object WindowsBackupAudit.Varredura }
+            $caminhoManifesto = Join-Path (Join-Path $controle 'manifestos') "$($o.Nome).tsv"
+            $manifesto = [WindowsBackupAudit.Nativo]::LerManifesto($caminhoManifesto)
+            if ($manifesto.Problema) {
+                Write-Etapa "Manifesto de $($o.Nome) ignorado: $($manifesto.Problema) Os arquivos serão conferidos de novo por SHA-256." Yellow
+            }
+            $plano = [WindowsBackupAudit.Nativo]::Classificar($o.Nome, $vOrigem, $vDestino, $manifesto)
+            foreach ($rel in $plano.Obsoletos) { [void]$manifesto.Registros.Remove($rel) }
+            $contextos.Add([pscustomobject]@{
+                Origem = $o; PastaDestino = $pastaDestino; Plano = $plano; Manifesto = $manifesto
+                CaminhoManifesto = $caminhoManifesto; UltimoSalvo = Get-Date; CodigoRobocopy = $null; Log = ''
+            })
+            foreach ($e in $vOrigem.Erros) { Add-Detalhe $detalhes 'ERRO' $o.Nome $e[0] 0 '' $e[1] }
+            foreach ($l in $vOrigem.Links) { Add-Detalhe $detalhes 'LINK_IGNORADO' $o.Nome $l 0 '' 'Atalho do sistema (junction/symlink): não é seguido.' }
+            foreach ($a in $plano.Nuvem) {
+                Add-Detalhe $detalhes 'SO_NA_NUVEM' $o.Nome $a.Relativo $a.Bytes '' "Disponível só online. Para incluir: botão direito > 'Sempre manter neste dispositivo'."
+            }
         }
-        # Auditoria rápida: tamanhos sem candidatos no destino não precisam de SHA.
-        # Nunca usar esta otimização no Backup; toda cópia é verificada por conteúdo.
-        $knownSizes=New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
-        foreach ($key in $index.Keys) {
-            if ($key.StartsWith('@size|',[StringComparison]::Ordinal)) { $null=$knownSizes.Add($key.Substring(6)) }
+        $porNome = @{}
+        foreach ($ctx in $contextos) { $porNome[$ctx.Plano.Nome] = $ctx }
+        $planos = [WindowsBackupAudit.Plano[]]@($contextos | ForEach-Object { $_.Plano })
+        $movimentos = @([WindowsBackupAudit.Nativo]::AssociarMovidos($planos, $script:MinimoMovido))
+        Show-Plano $contextos $movimentos
+
+        if ($Modo -eq 'Simular') {
+            $movidos = @{}
+            foreach ($m in $movimentos) {
+                $movidos[$m.Novo] = $true
+                Add-Detalhe $detalhes 'MOVER' $m.PlanoNovo.Nome $m.Novo.Relativo $m.Novo.Bytes '' "Mesmo conteúdo de $($m.PlanoAntigo.Nome)\$($m.Antigo.Relativo) (renomeado/movido)."
+            }
+            foreach ($ctx in $contextos) {
+                foreach ($a in $ctx.Plano.Novos) { if (-not $movidos.ContainsKey($a)) { Add-Detalhe $detalhes 'COPIAR' $ctx.Plano.Nome $a.Relativo $a.Bytes } }
+                foreach ($a in $ctx.Plano.Alterados) { Add-Detalhe $detalhes 'ATUALIZAR' $ctx.Plano.Nome $a.Relativo $a.Bytes '' 'A versão atual do backup será guardada em _VERSOES_ANTERIORES.' }
+                foreach ($a in $ctx.Plano.Conferir) { Add-Detalhe $detalhes 'CONFERIR' $ctx.Plano.Nome $a.Relativo $a.Bytes '' 'Já está no backup; será conferido por SHA-256.' }
+            }
+        } else {
+            Invoke-EtapasDeGravacao -Contextos $contextos -PorNome $porNome -Movimentos $movimentos -Config $Config `
+                -Destino $Destino -CaminhosOrigem $caminhosOrigem -Disco $disco -Carimbo $carimbo -Execucao $execucao `
+                -Detalhes $detalhes -Threads $Threads
         }
-        $script:BackupProgress.QuickAuditUnhashed=0
-        $optionalIndexed=$false
-        $tasks=New-Object 'Collections.Generic.List[object]'
-        foreach ($source in $Sources) { $tasks.Add([pscustomobject]@{Id=$source.Id;Path=$source.Path;BasePath=$source.Path;Optional=$false;Decision=$null}) }
-        for ($taskNumber=0; $taskNumber -lt $tasks.Count; $taskNumber++) {
-            $source=$tasks[$taskNumber]
-            $root = [IO.Path]::GetFullPath($source.BasePath).TrimEnd('\')
+        $concluido = $true
+    } catch {
+        $falha = $_.Exception.Message
+        Write-Etapa "Execução interrompida: $falha" Red
+    } finally {
+        foreach ($ctx in $contextos) {
+            if ($Modo -eq 'Backup') {
+                try { Save-Manifesto $ctx } catch { if (-not $falha) { $falha = "Não foi possível gravar o manifesto: $($_.Exception.Message)" } }
+            }
+        }
+        $contagens = @($contextos | ForEach-Object { Get-ContagemOrigem $_ })
+        $erros = 0; $nuvem = 0; $pendentes = 0
+        foreach ($c in $contagens) { $erros += $c.Erros; $nuvem += $c.Nuvem; $pendentes += $c.Pendentes }
+        if ($Modo -eq 'Backup' -and $concluido -and $pendentes) { $erros += $pendentes }
+        $sit = Get-Situacao -Erros $erros -Avisos $nuvem -Concluido $concluido
+        if ($null -ne $detalhes) { try { $detalhes.Dispose() } catch { Write-Verbose 'detalhes já fechado' } }
+        $relatorio = ''
+        if ($Modo -eq 'Backup' -and $execucao) {
             try {
-                $optionalFiles=$null
-                if ($source.Optional) {
-                    if ($errors -gt 0 -or $issues.Count -gt 0) {
-                        $source.Decision.Decision='NOT_COPIED_ESSENTIAL_OR_PREVIOUS_ERRORS'; Save-BackupDecisions; continue
-                    }
-                    Show-BackupProgress -Phase 'Dimensionando bibliotecas opcionais' -Path $source.Path
-                    $optionalFiles=@(Get-BackupFiles $source.Path -Issues $issues)
-                    $estimated=[long](($optionalFiles | Measure-Object Length -Sum).Sum)
-                    $source.Decision.EstimatedBytes=$estimated
-                    if ($issues.Count -gt 0) { $source.Decision.Decision='NOT_COPIED_ENUMERATION_ERRORS'; Save-BackupDecisions; continue }
-                    $space=Assert-ExternalDestination $destinationPath $sourcePaths $identity
-                    if ($space.FreeBytes -lt ($estimated + 256MB)) {
-                        $source.Decision.Decision='NOT_COPIED_SPACE'; Save-BackupDecisions; continue
-                    }
-                    if (-not $optionalIndexed) {
-                        foreach ($skipped in $indexSkipped) {
-                            if ($skipped.Kind -eq 'Cache gerado') { continue }
-                            $extra=Get-ExistingBackupIndex $skipped.Path
-                            foreach ($key in $extra.Keys) {
-                                if (-not $index.ContainsKey($key)) { $index[$key]=New-Object 'Collections.Generic.List[string]' }
-                                foreach ($candidate in $extra[$key]) { $index[$key].Add($candidate) }
-                            }
-                        }
-                        $optionalIndexed=$true
-                    }
-                    $source.Decision.Decision='COPYING_OPTIONAL'; Save-BackupDecisions
-                }
-                $getFiles = {
-                    if ($source.Optional) { $optionalFiles }
-                    else { Get-BackupFiles $source.Path -ExcludedPaths $ExcludedPaths -Issues $issues -DependencyPolicy $DependencyPolicy -Dependencies $dependencies -OwnerId $source.Id -OwnerRoot $source.BasePath }
-                }
-                & $getFiles | ForEach-Object {
-                    $file = $_
-                    if ($seen.Add($file.FullName)) {
-                        $relative = $file.FullName.Substring($root.Length + 1)
-                        $target = Join-Path (Join-Path $destinationPath $source.Id) $relative
-                        $status = 'NEEDS_COPY'; $hash = ''; $message = ''; $actual = ''
-                        try {
-                            $null = Assert-ExternalDestination $target $sourcePaths $identity
-                            $mustHash = $Mode -eq 'Backup' -or -not $QuickAudit -or $knownSizes.Contains([string]$file.Length)
-                            $existing = $null
-                            if ($mustHash) {
-                                $hash = Get-BackupHash $file.FullName -Source
-                                $existing = Find-ExistingContent $hash $file.Length $index
-                            } else {
-                                # Sem leitura de conteúdo: verificar disponibilidade e registrar
-                                # SHA vazio. NEEDS_COPY não é uma confirmação de integridade.
-                                Assert-SourceFileAvailable $file.FullName
-                                $script:BackupProgress.QuickAuditUnhashed++
-                            }
-                            if ($existing) {
-                                $actual = $existing
-                                $status = if ($existing -eq $target) { 'SKIP_IDENTICAL' } else { 'REUSED_EXISTING' }
-                            } elseif ($Mode -eq 'Backup') {
-                                $status = Copy-VerifiedFile $file.FullName $target (Join-Path $run 'robocopy.log') $identity
-                                if ((Get-BackupHash $target) -ne $hash) { throw 'A origem mudou desde a comparação; execute novamente.' }
-                                $actual = $target
-                                $key = ([string]$file.Length) + '|' + $hash
-                                if (-not $index.ContainsKey($key)) { $index[$key] = New-Object 'Collections.Generic.List[string]' }
-                                $index[$key].Add($target)
-                            }
-                        } catch { $status = 'ERROR'; $message = $_.Exception.Message; $errors++ }
-                        $null = Assert-ExternalDestination $csv $sourcePaths $identity
-                        [pscustomobject]@{Source=$file.FullName; RelativePath=('.\' + $relative); RootId=$source.Id;
-                            PlannedDestination=$target; Destination=$actual; Bytes=$file.Length;
-                            SHA256=$hash; Status=$status; Error=$message; Category=(Get-BackupCategory $file.FullName); Priority=$(if ($source.Optional) {'OPTIONAL_DEPENDENCY'} else {'ESSENTIAL'})} |
-                            Export-Csv -LiteralPath $csv -Append -NoTypeInformation -Encoding UTF8 -ErrorAction Stop
-                        $script:BackupProgress.AuditFiles++
-                        $script:BackupProgress.AuditBytes += $file.Length
-                        if (-not $script:BackupProgress.Results.ContainsKey($status)) { $script:BackupProgress.Results[$status]=0 }
-                        $script:BackupProgress.Results[$status]++
-                        Show-BackupProgress -Phase 'Comparando arquivos' -Path $file.FullName
-                    }
-                }
-            } catch {
-                $errors++
-                $null = Assert-ExternalDestination $run $sourcePaths $identity
-                $_.Exception.Message | Add-Content -LiteralPath (Join-Path $run 'erros.txt') -ErrorAction Stop
-            }
-            if ($source.Optional) { $source.Decision.Decision=if ($errors -or $issues.Count) {'OPTIONAL_INCOMPLETE'} else {'OPTIONAL_VERIFIED'} }
-            if ($taskNumber -eq ($Sources.Count - 1) -and $Mode -eq 'Backup' -and $DependencyPolicy -eq 'Auto') {
-                foreach ($decision in $dependencies) {
-                    if ($decision.Kind -eq 'Cache gerado') { $decision.Decision='EXCLUDED_GENERATED_CACHE'; continue }
-                    $tasks.Add([pscustomobject]@{Id=$decision.OwnerId;Path=$decision.Path;BasePath=$decision.OwnerRoot;Optional=$true;Decision=$decision})
-                }
-            }
-            Save-BackupDecisions
+                $relatorio = Write-RelatorioBackup -Execucao $execucao -Controle $controle -Destino $Destino -Disco $disco `
+                    -Situacao $sit.Situacao -Falha $falha -Inicio $inicio -Contagens $contagens -Contextos $contextos
+            } catch { Write-Etapa "Não foi possível gravar o relatório: $($_.Exception.Message)" Red }
+        } elseif ($Modo -eq 'Simular' -and $null -ne $detalhes) {
+            $relatorio = Join-Path $execucao "simulacao-$carimbo.tsv"
         }
-        Save-BackupDecisions
-        $null = Assert-ExternalDestination $run $sourcePaths $identity
-        if ($issues.Count) {
-            $errors += $issues.Count
-            $issues | Export-Csv -LiteralPath (Join-Path $run 'falhas-enumeracao.csv') -NoTypeInformation -Encoding UTF8
+        if ($null -ne $trava) { $trava.Dispose() }
+        $resumo = [pscustomobject]@{
+            Modo = $Modo; Situacao = $sit.Situacao; CodigoSaida = $sit.Codigo; Falha = $falha
+            Destino = $Destino; Relatorio = $relatorio; Inicio = $inicio; Duracao = (Get-Date) - $inicio
+            Erros = $erros; SoNaNuvem = $nuvem; Origens = $contagens; Movimentos = $movimentos.Count
         }
-        try {
-            Write-BackupManifest -Run $run -Sources $Sources -ExcludedPaths $ExcludedPaths -DependencyPolicy $DependencyPolicy -Errors $errors -Dependencies $dependencies
-        } catch {
-            $errors++
-            $_.Exception.Message | Add-Content -LiteralPath (Join-Path $run 'erros.txt') -ErrorAction Stop
-        }
-        [pscustomobject]@{HashReads=$script:BackupProgress.Files;HashBytes=$script:BackupProgress.Bytes;
-            HashSeconds=$script:BackupProgress.HashSeconds;DestinationIndexedFiles=$script:BackupProgress.DestinationIndexedFiles;
-            DestinationHashCandidates=$script:BackupProgress.DestinationHashCandidates;SizeBucketsResolved=$script:BackupProgress.SizeBucketsResolved;
-            QuickAuditUnhashed=$script:BackupProgress.QuickAuditUnhashed;
-            ElapsedSeconds=([DateTime]::UtcNow-$script:BackupProgress.Started).TotalSeconds} |
-            ConvertTo-Json | Set-Content -LiteralPath (Join-Path $run 'metricas.json') -Encoding UTF8
-        [pscustomobject]@{Mode=$Mode; Errors=$errors; Report=$run; FormattingDecision='NOT_ASSESSED';
-            DiskId=$identity.DiskId; VolumeId=$identity.VolumeId; DependencyPolicy=$DependencyPolicy; DependencyFolders=$dependencies.Count;QuickAudit=[bool]$QuickAudit} |
-            ConvertTo-Json | Set-Content -LiteralPath (Join-Path $run 'resumo.json') -Encoding UTF8
-        Write-BackupReview -Run $run -Sources $Sources -Mode $Mode -Errors $errors
-        Write-BackupPartial -Phase 'Execução encerrada' -Finished
-        Write-Host "Relatório para revisão: $(Join-Path $run 'LEIA-ME.html')"
-        if ($errors) { throw "$errors erro(s). Consulte $run" }
-        return $run
-    } finally { $lock.Dispose(); Stop-BackupProgress }
+    }
+    return $resumo
 }
 
-Export-ModuleMember -Function Assert-BackupDependencies, Write-BackupReview, Test-PathWithin,
-    Get-BackupFiles, Get-BackupHash, Copy-VerifiedFile, Invoke-BackupPlan,
-    Assert-PlainPath, Get-StorageIdentity, Assert-ExternalDestination, Select-BackupDestination,
-    Get-ExistingBackupIndex, Find-ExistingContent, New-BackupConfiguration,
-    Get-ReparseTag, Test-CloudReparseTag, Assert-SourceFileAvailable, Get-AutomaticBackupPlan,
-    Start-BackupProgress, Show-BackupProgress, Stop-BackupProgress, Get-DependencyFolder, Get-MerkleDigest, Write-BackupManifest, Compare-BackupManifest
+function Invoke-EtapasDeGravacao {
+    # Etapas 2 a 5 do backup (as únicas que gravam no HD).
+    param($Contextos, $PorNome, $Movimentos, $Config, [string]$Destino, [string[]]$CaminhosOrigem, $Disco,
+        [string]$Carimbo, [string]$Execucao, $Detalhes, [int]$Threads)
+    $porNome = $PorNome; $movimentos = $Movimentos; $contextos = $Contextos; $disco = $Disco
+    $caminhosOrigem = $CaminhosOrigem; $detalhes = $Detalhes; $carimbo = $Carimbo; $execucao = $Execucao
+
+    # 2) Pastas renomeadas/movidas na origem: move a cópia no próprio HD.
+    if ($movimentos.Count) {
+        Assert-MesmoDisco $Destino $caminhosOrigem $disco
+        Write-Etapa "Movendo no HD $($movimentos.Count) arquivo(s) que só mudaram de lugar"
+        foreach ($m in $movimentos) {
+            $ctxNovo = $porNome[$m.PlanoNovo.Nome]
+            $ctxAntigo = $porNome[$m.PlanoAntigo.Nome]
+            $de = Join-Path $ctxAntigo.PastaDestino $m.Antigo.Relativo
+            $para = Join-Path $ctxNovo.PastaDestino $m.Novo.Relativo
+            try { [WindowsBackupAudit.Nativo]::Mover($de, $para) } catch { continue }   # será copiado normalmente
+            $r = [WindowsBackupAudit.Nativo]::Verificar((Join-Path $ctxNovo.Origem.Caminho $m.Novo.Relativo), $para)
+            if ($r.Ok) {
+                $reg = New-Object WindowsBackupAudit.Registro
+                $reg.Relativo = $m.Novo.Relativo; $reg.Bytes = $r.Bytes; $reg.Modificado = $r.Modificado
+                $reg.Sha256 = $r.HashOrigem; $reg.Verificado = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')
+                [void]$ctxAntigo.Manifesto.Registros.Remove($m.Antigo.Relativo)
+                $ctxNovo.Manifesto.Registros[$m.Novo.Relativo] = $reg
+                $m.Novo.Estado = 'MOVIDO'; $m.Novo.Sha256 = $r.HashOrigem
+                Add-Detalhe $detalhes 'MOVIDO' $ctxNovo.Origem.Nome $m.Novo.Relativo $r.Bytes $r.HashOrigem "Antes em $($ctxAntigo.Origem.Nome)\$($m.Antigo.Relativo)"
+            } else {
+                try { [WindowsBackupAudit.Nativo]::Mover($para, $de) }
+                catch {
+                    $m.Novo.Estado = 'ERRO'
+                    $m.Novo.Mensagem = "Não foi possível desfazer a movimentação ($($_.Exception.Message)). Confira $para."
+                    Add-Detalhe $detalhes 'ERRO' $ctxNovo.Origem.Nome $m.Novo.Relativo $m.Novo.Bytes '' $m.Novo.Mensagem
+                }
+            }
+        }
+    }
+
+    # 3) Arquivos que já estão no backup mas sem registro (backup antigo ou execução
+    #    interrompida): confere por SHA-256 em vez de copiar de novo.
+    foreach ($ctx in $contextos) {
+        if (-not $ctx.Plano.Conferir.Count) { continue }
+        Write-Etapa "Conferindo $($ctx.Plano.Conferir.Count) arquivo(s) de $($ctx.Origem.Nome) que já estão no HD"
+        $divergentes = Invoke-VerificacaoArquivos -Ctx $ctx -Arquivos $ctx.Plano.Conferir.ToArray() -EstadoOk 'CONFERIDO' -Detalhes $detalhes -DevolverDivergentes
+        if ($divergentes.Count) {
+            # A cópia no HD é diferente da origem: tratada como alterada (a antiga é guardada).
+            $diferentes = @{}
+            foreach ($a in $divergentes) { $diferentes[$a] = $true }
+            $restantes = New-Object 'Collections.Generic.List[WindowsBackupAudit.Arquivo]'
+            foreach ($a in $ctx.Plano.Conferir) {
+                if ($diferentes.ContainsKey($a)) { $ctx.Plano.Alterados.Add($a) } else { $restantes.Add($a) }
+            }
+            $ctx.Plano.Conferir = $restantes
+        }
+        Save-Manifesto $ctx
+    }
+
+    # 4) Espaço livre suficiente para tudo o que falta copiar?
+    $faltam = [long]0
+    foreach ($ctx in $contextos) {
+        foreach ($a in $ctx.Plano.Novos) { if (-not $a.Estado) { $faltam += $a.Bytes } }
+        foreach ($a in $ctx.Plano.Alterados) { $faltam += $a.Bytes }
+    }
+    $livre = Get-LivreDestino $Destino
+    if ($livre -lt ($faltam + $script:MargemEspaco)) {
+        throw ("Espaço insuficiente no HD: é preciso copiar {0} e há {1} livres (margem de segurança: {2}). " +
+            'Use um HD maior ou libere espaço (por exemplo, apagando pastas antigas em _VERSOES_ANTERIORES).') -f `
+            (Format-Tamanho $faltam), (Format-Tamanho $livre), (Format-Tamanho $script:MargemEspaco)
+    }
+
+    # 5) Para cada origem: guardar versões antigas, copiar o que falta, conferir.
+    foreach ($ctx in $contextos) {
+        $nome = $ctx.Origem.Nome
+        if ($ctx.Plano.Alterados.Count) {
+            Assert-MesmoDisco $Destino $caminhosOrigem $disco
+            $pastaVersoes = Join-Path (Join-Path (Join-Path $Destino '_VERSOES_ANTERIORES') $carimbo) $nome
+            Write-Etapa "Guardando a versão anterior de $($ctx.Plano.Alterados.Count) arquivo(s) alterado(s) de $nome"
+            foreach ($a in $ctx.Plano.Alterados) {
+                try {
+                    [WindowsBackupAudit.Nativo]::Mover((Join-Path $ctx.PastaDestino $a.Relativo), (Join-Path $pastaVersoes $a.Relativo))
+                    [void]$ctx.Manifesto.Registros.Remove($a.Relativo)
+                } catch {
+                    $a.Estado = 'ERRO'
+                    $a.Mensagem = "Não foi possível guardar a versão anterior; o arquivo não foi atualizado: $($_.Exception.Message)"
+                    Add-Detalhe $detalhes 'ERRO' $nome $a.Relativo $a.Bytes '' $a.Mensagem
+                }
+            }
+        }
+        $novos = New-Object 'Collections.Generic.List[object]'
+        $alterados = New-Object 'Collections.Generic.List[object]'
+        $bytesCopiar = [long]0
+        foreach ($a in $ctx.Plano.Novos) { if (-not $a.Estado) { $novos.Add($a); $bytesCopiar += $a.Bytes } }
+        foreach ($a in $ctx.Plano.Alterados) { if (-not $a.Estado) { $alterados.Add($a); $bytesCopiar += $a.Bytes } }
+        $quantos = $novos.Count + $alterados.Count
+        if ($quantos) {
+            Assert-MesmoDisco $Destino $caminhosOrigem $disco
+            Write-Etapa "Copiando $quantos arquivo(s) de $nome ($(Format-Tamanho $bytesCopiar)) com Robocopy"
+            if (-not (Test-Path -LiteralPath $ctx.PastaDestino)) { New-Item -ItemType Directory -Path $ctx.PastaDestino -Force | Out-Null }
+            $ctx.Log = Join-Path $execucao "robocopy-$nome.log"
+            $excluirPastas = [string[]]@(@($Config.ExcluirPastas) + @($ctx.Plano.Origem.PastasExcluir) | Where-Object { $_ })
+            $excluirArquivos = [string[]]@(@($Config.ExcluirArquivos) + @($ctx.Plano.Origem.ArquivosExcluir) | Where-Object { $_ })
+            $ctx.CodigoRobocopy = Invoke-Robocopy -Origem $ctx.Origem.Caminho -Destino $ctx.PastaDestino `
+                -ExcluirPastas $excluirPastas -ExcluirArquivos $excluirArquivos -Log $ctx.Log -Threads $Threads `
+                -BytesPrevistos $bytesCopiar -Rotulo $nome
+            if ($ctx.CodigoRobocopy -ge 8) {
+                Write-Etapa "Robocopy terminou com código $($ctx.CodigoRobocopy): alguns arquivos falharam. Cada arquivo será conferido." Yellow
+            }
+            Write-Etapa "Conferindo as cópias de $nome por SHA-256"
+            $null = Invoke-VerificacaoArquivos -Ctx $ctx -Arquivos $novos.ToArray() -EstadoOk 'COPIADO' -Detalhes $detalhes -Atividade 'Conferindo cópias de'
+            $null = Invoke-VerificacaoArquivos -Ctx $ctx -Arquivos $alterados.ToArray() -EstadoOk 'ATUALIZADO' -Detalhes $detalhes -Atividade 'Conferindo cópias de'
+        }
+        Save-Manifesto $ctx
+    }
+}
+
+# ------------------------------------------------------------------ verificar integridade
+function Invoke-VerificacaoWBA {
+    <#
+    .SYNOPSIS
+    Relê as cópias do HD e compara com o SHA-256 registrado no manifesto (detecta
+    arquivos corrompidos ou alterados no backup). Arquivos com problema saem do
+    manifesto: o próximo backup os copia de novo (a cópia ruim vai para _VERSOES_ANTERIORES).
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Destino, [string[]]$Origens = @(), [ValidateRange(1, 100)][int]$Amostra = 100)
+    $inicio = Get-Date
+    Clear-CacheDisco
+    $disco = Assert-DestinoSeguro $Destino $Origens
+    $Destino = $Destino.TrimEnd('\', '/')
+    $controle = Join-Path $Destino '_CONTROLE'
+    $pastaManifestos = Join-Path $controle 'manifestos'
+    if (-not (Test-Path -LiteralPath $pastaManifestos -PathType Container)) {
+        throw 'Este HD ainda não tem manifestos desta versão. Faça um backup primeiro.'
+    }
+    $trava = Open-Trava $Destino
+    $execucao = Join-Path (Join-Path $controle 'execucoes') (Get-Carimbo -Controle $controle -Sufixo '-verificacao')
+    New-Item -ItemType Directory -Path $execucao -Force | Out-Null
+    $detalhes = New-Detalhes (Join-Path $execucao 'detalhes.tsv')
+    $linhas = New-Object 'Collections.Generic.List[object]'
+    $problemas = 0; $concluido = $false; $falha = ''
+    $sorteio = New-Object Random
+    try {
+        foreach ($arquivo in @(Get-ChildItem -LiteralPath $pastaManifestos -Filter '*.tsv' -File)) {
+            $nome = $arquivo.BaseName
+            $pasta = Join-Path $Destino $nome
+            $m = [WindowsBackupAudit.Nativo]::LerManifesto($arquivo.FullName)
+            if ($m.Problema) {
+                $problemas++
+                Add-Detalhe $detalhes 'ERRO' $nome '' 0 '' "Manifesto: $($m.Problema) O próximo backup confere tudo de novo."
+                $linhas.Add([pscustomobject]@{ Nome = $nome; Registros = 0; Conferidos = 0; Problemas = 1; Bytes = 0 })
+                continue
+            }
+            $registros = @($m.Registros.Values | Where-Object { $Amostra -ge 100 -or $sorteio.Next(100) -lt $Amostra })
+            Write-Etapa "Conferindo $($registros.Count) arquivo(s) de $nome"
+            $ok = 0; $ruins = 0; $bytes = [long]0; $feitos = 0
+            $agora = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')
+            foreach ($lote in (New-Lotes $registros { param($x) $x.Bytes })) {
+                $n = $lote.Itens.Count
+                $caminhos = New-Object 'string[]' $n; $tamanhos = New-Object 'long[]' $n; $shas = New-Object 'string[]' $n
+                for ($i = 0; $i -lt $n; $i++) {
+                    $caminhos[$i] = [IO.Path]::Combine($pasta, $lote.Itens[$i].Relativo)
+                    $tamanhos[$i] = $lote.Itens[$i].Bytes
+                    $shas[$i] = $lote.Itens[$i].Sha256
+                }
+                $resultados = [WindowsBackupAudit.Nativo]::ConferirLote($caminhos, $tamanhos, $shas, [math]::Min(2, $lote.Paralelo))
+                for ($i = 0; $i -lt $n; $i++) {
+                    $reg = $lote.Itens[$i]; $r = $resultados[$i]
+                    $feitos++
+                    if ($r.Ok) { $ok++; $bytes += $reg.Bytes; $reg.Verificado = $agora }
+                    else {
+                        $ruins++
+                        [void]$m.Registros.Remove($reg.Relativo)
+                        Add-Detalhe $detalhes 'PROBLEMA' $nome $reg.Relativo $reg.Bytes $reg.Sha256 $r.Erro
+                    }
+                }
+                Write-Progress -Id 3 -Activity "Verificando $nome" -Status "$feitos de $($registros.Count)" -PercentComplete ([int](100.0 * $feitos / [math]::Max(1, $registros.Count)))
+            }
+            Write-Progress -Id 3 -Activity "Verificando $nome" -Completed
+            [WindowsBackupAudit.Nativo]::GravarManifesto($arquivo.FullName, $m)
+            $problemas += $ruins
+            $linhas.Add([pscustomobject]@{ Nome = $nome; Registros = $m.Registros.Count + $ruins; Conferidos = $ok; Problemas = $ruins; Bytes = $bytes })
+        }
+        $concluido = $true
+    } catch {
+        $falha = $_.Exception.Message
+        Write-Etapa "Verificação interrompida: $falha" Red
+    } finally {
+        $detalhes.Dispose()
+        $sit = Get-Situacao -Erros $problemas -Avisos 0 -Concluido $concluido
+        $relatorio = ''
+        try {
+            $relatorio = Write-RelatorioVerificacao -Execucao $execucao -Controle $controle -Destino $Destino -Disco $disco `
+                -Situacao $sit.Situacao -Falha $falha -Inicio $inicio -Linhas $linhas.ToArray() -Amostra $Amostra
+        } catch { Write-Etapa "Não foi possível gravar o relatório: $($_.Exception.Message)" Red }
+        $trava.Dispose()
+    }
+    return [pscustomobject]@{
+        Modo = 'Verificar'; Situacao = $sit.Situacao; CodigoSaida = $sit.Codigo; Falha = $falha; Destino = $Destino
+        Relatorio = $relatorio; Inicio = $inicio; Duracao = (Get-Date) - $inicio; Erros = $problemas; Origens = $linhas.ToArray()
+    }
+}
+
+Export-ModuleMember -Function @(
+    'Invoke-BackupWBA', 'Invoke-VerificacaoWBA', 'Invoke-Robocopy', 'Format-Tamanho', 'Write-Etapa',
+    'Read-Configuracao', 'ConvertFrom-TextoConfig', 'Assert-Configuracao', 'Read-TextoConfig', 'New-TextoConfig',
+    'Save-TextoConfig', 'Get-OrigensSugeridas', 'Get-NomePadrao', 'Test-NomeValido', 'Resolve-CaminhoLocal',
+    'Test-Dentro', 'Get-IdVersaoAnterior', 'Get-InfoDisco', 'Clear-CacheDisco', 'Assert-DestinoSeguro',
+    'Resolve-Destino', 'Test-PastaDeBackup', 'Get-DiscosCandidatos', 'Select-DestinoInterativo',
+    'Register-BackupAgendado', 'Unregister-BackupAgendado', 'Get-BackupAgendado',
+    'Invoke-AssistenteConfiguracao', 'Invoke-AssistenteAgendamento', 'Show-Resumo', 'Open-UltimoRelatorio',
+    'Set-DestinoNoTexto')

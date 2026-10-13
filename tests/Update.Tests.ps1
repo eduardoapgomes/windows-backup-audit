@@ -1,4 +1,4 @@
-BeforeAll {
+﻿BeforeAll {
     $updater = Join-Path $PSScriptRoot '..\Atualizar.cmd'
 
     # Windows PowerShell 5.1 converte mensagens normais do stderr do Git em
@@ -20,11 +20,11 @@ Describe 'Safe one-click updater' {
         $dir = New-Item -ItemType Directory (Join-Path $TestDrive 'zip install') -Force
         $path = Join-Path $dir.FullName 'Atualizar.cmd'
         Copy-Item -LiteralPath $updater -Destination $path
-        Set-Content -LiteralPath (Join-Path $dir.FullName 'backup.local.json') -Value 'my config'
+        Set-Content -LiteralPath (Join-Path $dir.FullName 'configuracao.txt') -Value 'my config'
         $result = Invoke-TestUpdater -Path $path
         $result.ExitCode | Should -Be 2
         ($result.Output -join ' ') | Should -Match 'ZIP'
-        (Get-Content -LiteralPath (Join-Path $dir.FullName 'backup.local.json') -Raw) | Should -Match 'my config'
+        (Get-Content -LiteralPath (Join-Path $dir.FullName 'configuracao.txt') -Raw) | Should -Match 'my config'
     }
 
     It 'fast-forwards main from an offline origin and preserves manual config; rejects dirty files' -Skip:($null -eq (Get-Command git.exe -ErrorAction SilentlyContinue)) {
@@ -41,7 +41,8 @@ Describe 'Safe one-click updater' {
         New-Item -ItemType Directory (Join-Path $client 'src') -Force | Out-Null
         Set-Content -LiteralPath (Join-Path $client 'Backup.ps1') -Value '# test entry'
         Set-Content -LiteralPath (Join-Path $client 'src\Backup.Core.psm1') -Value '# test module'
-        Set-Content -LiteralPath (Join-Path $client '.gitignore') -Value 'backup.local.json'
+        Set-Content -LiteralPath (Join-Path $client 'src\Nativo.cs') -Value '// test native'
+        Set-Content -LiteralPath (Join-Path $client '.gitignore') -Value 'configuracao.txt'
         Invoke-FixtureGit ('git -C "' + $client + '" add .')
         Invoke-FixtureGit ('git -C "' + $client + '" commit -m initial')
         Invoke-FixtureGit ('git -C "' + $client + '" push -u origin main')
@@ -54,12 +55,12 @@ Describe 'Safe one-click updater' {
         Invoke-FixtureGit ('git -C "' + $other + '" commit -m update')
         Invoke-FixtureGit ('git -C "' + $other + '" push origin main')
 
-        Set-Content -LiteralPath (Join-Path $client 'backup.local.json') -Value 'private config'
+        Set-Content -LiteralPath (Join-Path $client 'configuracao.txt') -Value 'private config'
         $result = Invoke-TestUpdater -Path (Join-Path $client 'Atualizar.cmd')
         if ($result.ExitCode -ne 0) { throw ("Atualizar.cmd saiu com codigo {0}: {1}" -f $result.ExitCode, ($result.Output -join ' | ')) }
         $result.ExitCode | Should -Be 0
         (Test-Path -LiteralPath (Join-Path $client 'new-version.txt')) | Should -BeTrue
-        (Get-Content -LiteralPath (Join-Path $client 'backup.local.json') -Raw) | Should -Match 'private config'
+        (Get-Content -LiteralPath (Join-Path $client 'configuracao.txt') -Raw) | Should -Match 'private config'
 
         Set-Content -LiteralPath (Join-Path $client 'Backup.ps1') -Value '# user change'
         $result = Invoke-TestUpdater -Path (Join-Path $client 'Atualizar.cmd')

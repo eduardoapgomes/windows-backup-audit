@@ -1,80 +1,61 @@
 # Instalar e atualizar — Windows 10/11
 
-**Use somente a branch `main` como versão de uso.** Não é necessário criar fork, instalar Python ou usar branches de desenvolvimento para fazer backup. O programa usa Windows PowerShell 5.1, já disponível no Windows 10/11.
+**Use a branch `main`.** Não é preciso Python nem permissões de administrador. O programa usa o Windows PowerShell 5.1 e o Robocopy, que já vêm no Windows (funciona também no PowerShell 7).
 
-## Primeira instalação (recomendado: Git)
+## Instalar com ZIP (mais simples)
 
-Instale o [Git para Windows](https://git-scm.com/downloads/win) se ainda não estiver disponível. Abra **PowerShell** e execute:
+1. Baixe o [ZIP da versão atual](https://github.com/eduardoapgomes/windows-backup-audit/archive/refs/heads/main.zip).
+2. Clique com o botão direito › **Extrair tudo** e escolha uma pasta fixa, por exemplo `Documentos\windows-backup-audit`. **Extraia a pasta inteira**; não copie arquivos soltos.
+3. Confira que `Iniciar.cmd`, `Backup.ps1` e a pasta `src` estão juntos.
+4. Abra `Iniciar.cmd` e siga o [Guia rápido](GUIA-RAPIDO.md).
+
+## Instalar com Git (atualização em um clique)
+
+Instale o [Git para Windows](https://git-scm.com/downloads/win) e, no PowerShell:
 
 ```powershell
 New-Item -ItemType Directory -Force "$env:USERPROFILE\Projetos" | Out-Null
 Set-Location "$env:USERPROFILE\Projetos"
 git clone --branch main https://github.com/eduardoapgomes/windows-backup-audit.git
 Set-Location .\windows-backup-audit
-Test-Path .\Backup.ps1
-Test-Path .\src\Backup.Core.psm1
 .\Iniciar.cmd
 ```
 
-Os dois testes devem mostrar **True**. Se a pasta já existe, **não execute `git clone` por cima dela**: siga a seção de atualização.
+Se a pasta já existe, **não rode `git clone` de novo dentro dela**: atualize.
 
-Conecte um HD/SSD **USB externo NTFS**, em disco físico diferente do computador. No menu, use **1 — Auditoria focada**, revise `LEIA-ME.html` e `cobertura.csv`; depois use **2 — Backup focado**, selecionando o mesmo destino. Teste a restauração. A opção 3 permite escolher outras pastas.
+## Atualizar
 
-## Atualizar uma instalação Git
+- **Instalação Git:** feche o programa e dê dois cliques em **`Atualizar.cmd`**. Ele só atualiza a `main` com `git pull --ff-only`, recusa se você tiver alterado arquivos do programa e **não mexe** em `configuracao.txt` nem no HD.
+- **Instalação ZIP:** baixe o ZIP novo, extraia **em uma pasta nova** e copie para ela apenas o seu `configuracao.txt`. Não misture arquivos de versões diferentes.
 
-Feche o menu, a auditoria e o backup. Dentro da pasta do programa, **dê dois cliques em `Atualizar.cmd`**. Ele:
+O agendamento aponta para o `Backup.ps1` da pasta onde foi criado. Se mudar o programa de pasta, abra **5 – Agendar** de novo na pasta nova.
 
-- Atualiza **somente `main`**, usando `git pull --ff-only origin main`.
-- Para se houver alterações locais em arquivos versionados ou se a branch atual não for `main`; **não usa `reset --hard` nem `clean`**.
-- Confere a existência de `Backup.ps1` e `src\Backup.Core.psm1` após atualizar.
-- Não toca no HD USB nem no arquivo pessoal `backup.local.json` (ignorado pelo Git).
+## Vindo da versão 1
 
-Se preferir o terminal, dentro da pasta clonada:
+A versão 2 é mais simples e usa outra configuração (`configuracao.txt` em vez de `backup.local.json`), mas **aproveita o backup que já está no HD**:
 
-```powershell
-git status --short
-git branch --show-current
-git pull --ff-only origin main
-Test-Path .\Backup.ps1
-Test-Path .\src\Backup.Core.psm1
-.\Iniciar.cmd
-```
+1. Atualize (Git) ou extraia a versão nova em uma pasta nova (ZIP) e copie para ela o seu `backup.local.json`, se você usava o modo manual.
+2. Abra `Iniciar.cmd` › **4 – Configurar**. Se existir `backup.local.json`, as pastas são **importadas com os mesmos nomes** usados no HD. Caso contrário, o programa sugere as pastas pessoais.
+3. Escolha o **mesmo HD**. O caminho padrão (`BACKUP_WINDOWS\<COMPUTADOR>-<USUÁRIO>`) é o mesmo da versão 1.
+4. Faça o primeiro backup. O programa:
+   - renomeia no próprio HD as pastas `AUTO_…` da descoberta automática para os nomes novos (por exemplo, `AUTO_3F2A…` → `Documents`), sem copiar nada;
+   - **confere por SHA-256** os arquivos que já estão no HD, em vez de copiá-los de novo (por isso o primeiro backup lê tudo uma vez; os seguintes são rápidos);
+   - copia o que faltar. Arquivos que a versão 1 tinha “reaproveitado” de outro lugar do HD (`REUSED_EXISTING`) são copiados para o caminho certo.
 
-**Importante:** `git pull` não é uma reinstalação. Se `Backup.ps1` foi apagado localmente, o Git pode recusar a atualização. Não force nem apague arquivos: use uma pasta nova, como descrito abaixo.
+As pastas antigas `_RELATORIOS`, `.history-*` e `.stage-*` da versão 1 não são apagadas nem usadas; você pode guardá-las ou apagá-las manualmente depois de conferir o novo backup.
 
-## Instalar/atualizar sem Git (ZIP)
+O que saiu na versão 2 (auditoria sem cópia, mapa visual, MinHash/LSH, Merkle) e por quê: [Como funciona](COMO-FUNCIONA.md#decisões-a-partir-do-relatório-de-pesquisa) e [CHANGELOG](../CHANGELOG.md). Quem precisar da versão 1 pode baixá-la do histórico do repositório (commit `46dad4d`).
 
-1. Baixe o [ZIP da versão principal](https://github.com/eduardoapgomes/windows-backup-audit/archive/refs/heads/main.zip).
-2. **Extraia a pasta inteira em uma pasta nova** (por exemplo, `Projetos\windows-backup-audit-novo`). Não copie apenas `Iniciar.cmd` e não misture versões.
-3. Confirme que **`Iniciar.cmd`, `Backup.ps1` e `src\Backup.Core.psm1`** existem na mesma instalação.
-4. Se você usa o modo manual, copie **somente `backup.local.json`** da instalação anterior para a nova e confira os caminhos no arquivo. Não envie esse arquivo ao GitHub.
-5. Abra `Iniciar.cmd`. Se o backup já existe, selecione **a mesma pasta do HD USB** para revalidar/reutilizar cópias. **Não apague o backup anterior**.
+## Problemas
 
-`Atualizar.cmd` informa o endereço do ZIP quando a pasta não é um clone Git; não sobrescreve instalações ZIP automaticamente.
+**“o arquivo src\Backup.Core.psm1 não foi encontrado” / “Backup.ps1 não foi encontrado”.** A instalação está incompleta ou o `Iniciar.cmd` foi copiado sozinho. Extraia o ZIP inteiro em uma pasta nova.
 
-## Erro: “Backup.ps1 não existe”
+**Atualizar.cmd diz “branch diferente de main”.** Rode `git switch main` na pasta do programa e tente de novo. Se não souber avaliar as alterações locais, faça um clone novo em outra pasta.
 
-Esse erro significa **instalação incompleta ou menu aberto na pasta errada**. A auditoria não começou.
+**Atualizar.cmd diz “há modificações locais”.** Você (ou alguém) alterou arquivos do programa. Nada foi descartado. Faça um clone novo em outra pasta e copie só o `configuracao.txt`. **Não use `git reset --hard`.**
 
-No PowerShell, dentro da pasta que contém `Iniciar.cmd`:
+**“O Windows protegeu o computador” ou “a execução de scripts está desabilitada”.** O `Iniciar.cmd` já chama o PowerShell com `-ExecutionPolicy Bypass` só para este programa. Se o SmartScreen avisar, clique em **Mais informações › Executar assim mesmo**. Arquivos baixados podem ser desbloqueados em Propriedades › **Desbloquear**.
 
-```powershell
-Get-Location
-Test-Path .\Backup.ps1
-Test-Path .\src\Backup.Core.psm1
-Get-ChildItem -Path . -Filter Backup.ps1 -Recurse -File | Select-Object -ExpandProperty FullName
-```
+Para ver qual versão está instalada (Git): `git log -1 --oneline`. Os testes de cada versão estão na aba [Actions](https://github.com/eduardoapgomes/windows-backup-audit/actions).
 
-Se aparecer `Backup.ps1` numa subpasta, abra o `Iniciar.cmd` **daquela mesma subpasta**. Se não existir, reinstale em pasta nova. O menu atualizado detecta esse problema e **não mostra falso sucesso**.
-
-## Problemas de atualização
-
-- **Branch diferente de `main`:** verifique `git status --short`; se não houver alterações que precise guardar, execute `git switch main` e tente `Atualizar.cmd` novamente. Se não souber avaliar alterações, faça um clone novo em outra pasta.
-- **Arquivos versionados modificados:** `Atualizar.cmd` recusa o pull para preservar seu trabalho. Faça um clone novo ou resolva as mudanças conscientemente; **não use `git reset --hard`**.
-- **Git não instalado:** use o ZIP ou instale Git para Windows. O programa de backup não depende de Git para executar.
-- **Sem internet:** a atualização não funciona; o backup local continua disponível. Não execute versões misturadas.
-- **Energia acabou:** relatórios parciais não são confirmação de backup. Guarde os arquivos existentes no USB, atualize o programa em uma pasta íntegra e faça uma nova auditoria antes de copiar.
-
-Para ver qual commit está instalado numa cópia Git, use `git log -1 --oneline`. O histórico e a validação estão na aba [Actions](https://github.com/eduardoapgomes/windows-backup-audit/actions) do repositório. Testes automáticos **não substituem** um teste de restauração com o seu HD USB.
-
-[Voltar ao guia rápido](GUIA-RAPIDO.md) · [Segurança](SAFETY.md) · [Página principal](../README.md)
+[Guia rápido](GUIA-RAPIDO.md) · [Página principal](../README.md)

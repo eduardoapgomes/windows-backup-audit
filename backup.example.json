@@ -1,7 +1,0 @@
-{
-  "Destination": "",
-  "Sources": [
-    {"Id": "01_DOCUMENTOS", "Path": "C:\\Users\\SEU_USUARIO\\Documents"},
-    {"Id": "02_DOWNLOADS", "Path": "C:\\Users\\SEU_USUARIO\\Downloads"}
-  ]
-}
