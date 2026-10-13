@@ -8,7 +8,7 @@
 
 - Conecte um **HD ou SSD externo USB, formatado em NTFS**, com espaço suficiente. O programa não formata discos.
 - Feche documentos e programas que estejam modificando arquivos. Para bancos de dados, máquinas virtuais e ambientes especiais, faça também a exportação própria do aplicativo.
-- Baixe o projeto pelo botão **Code → Download ZIP** em https://github.com/eduardoapgomes/windows-backup-audit e extraia-o, **ou** use Git conforme as instruções do [README](../README.md).
+- Instale pelo [Git ou ZIP, seguindo o passo a passo](ATUALIZAR.md). **Extraia o ZIP inteiro em uma pasta nova**; não misture arquivos de versões diferentes.
 - Abra a pasta extraída e dê dois cliques em **Iniciar.cmd**. Não é preciso instalar Python nem editar JSON para usar as opções automáticas.
 
 ## Passo 1 — Conferir o que será protegido
@@ -70,10 +70,11 @@ Copie **alguns arquivos do HD USB para uma pasta vazia** fora das origens: um do
 
 **Preciso entender Merkle ou MinHash?** Não. O backup gera automaticamente os relatórios de comparação **Merkle**. Na auditoria rápida, folhas sem SHA ficam explicitamente não verificadas. **MinHash** aparece apenas no mapa visual opcional da opção **8**, que exige Python 3.9+ e sugere pastas parecidas sem mover ou excluir arquivos. Esses recursos não dispensam a verificação do backup.
 
-**Como atualizar o projeto?** Se você usou Git, feche qualquer execução e, na pasta do projeto, rode `git pull --ff-only`. Se baixou ZIP, baixe uma versão nova sem sobrescrever sua configuração manual `backup.local.json`.
+**Como atualizar o projeto?** Feche o programa. Em uma instalação Git, dê dois cliques em **`Atualizar.cmd`**: ele só atualiza a `main` quando não há alterações locais, sem apagar sua configuração. Em instalações ZIP, baixe o [ZIP da `main`](https://github.com/eduardoapgomes/windows-backup-audit/archive/refs/heads/main.zip), extraia em uma pasta nova e, se usar modo manual, copie apenas `backup.local.json`. Veja [Instalar e atualizar](ATUALIZAR.md).
 
 ## Mais detalhes
 
+- [Instalar, atualizar e resolver Backup.ps1 ausente](ATUALIZAR.md)
 - [README completo e instalação](../README.md)
 - [O que Merkle e MinHash realmente fazem](INCREMENTAL.md)
 - [Cobertura e dados especiais](COVERAGE.md)
