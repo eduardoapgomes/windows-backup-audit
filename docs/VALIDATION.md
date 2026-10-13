@@ -7,6 +7,12 @@ Em 08/10/2026, **64 testes Pester passaram, 0 falhas, 0 ignorados**, em Windows 
 
 > **Atenção:** os resultados históricos acima se referem ao commit citado, **não** às mudanças posteriores de descoberta focada, auditoria rápida e caches. Essas alterações exigem nova execução da CI/Pester e teste manual em Windows com USB antes de serem consideradas validadas. Não reutilize o número 88 como evidência da nova versão.
 
+## Testes novos da atualização focada (branch de desenvolvimento)
+
+A atualização inclui testes Pester para seleção top-down sem varrer `C:\` e `Users` inteiros, cache de bibliotecas, auditoria rápida com SHA-256 sob demanda, avisos de hash ausente nos relatórios e preservação do modo manual. Também inclui testes do `Atualizar.cmd` com origem Git local e instalação ZIP, sem acesso à rede nem HD real. **Apenas a execução aprovada da CI do commit final confirma esses testes.** Acompanhe [Windows tests](https://github.com/eduardoapgomes/windows-backup-audit/actions).
+
+O atualizador faz `git pull --ff-only origin main` apenas em instalações Git limpas na branch `main`; o ZIP é atualizado por extração em pasta nova. Esses testes não comprovam comportamento em todos os computadores Windows nem restauram dados reais.
+
 ## Cobertura executada
 
 - Índice sob demanda por tamanho: conteúdo sem tamanho correspondente nunca aberto, arquivo pequeno único copiado/verificado e candidato alterado rehashado após resolução do índice.
@@ -20,7 +26,7 @@ Em 08/10/2026, **64 testes Pester passaram, 0 falhas, 0 ignorados**, em Windows 
 - Política de bibliotecas com evidência: auditoria sem enumeração profunda, modo Include, preservação de projetos e manifests, junction rejeitada, dados essenciais antes das dependências, omissão explícita por falta de espaço/erros e reutilização de cópia manual de bibliotecas em outro caminho.
 - Análise somente leitura do inventário: fingerprint estável e sensível ao conteúdo observado, limites de grupos/pares, estrutura de projetos preservada, Jaccard, NCD opcional, HTML escapado e nenhuma declaração de cobertura completa a partir de inventário parcial.
 
-- Descoberta automática com metadados simulados: volumes internos de sistema/dados incluídos; USB excluído como origem; pastas redirecionadas, consolidação de raízes, identificadores estáveis e falhas de descoberta registradas.
+- **No commit histórico:** descoberta ampla com volumes internos de sistema/dados incluídos, USB excluído como origem, pastas redirecionadas, identificadores estáveis e falhas registradas. **Essa política ampla foi substituída** pela descoberta focada e não descreve a versão nova.
 - Enumeração com junction real: continuação pelas demais pastas e respeito a exclusões explícitas; destino continua interrompendo diante de índice incompleto.
 - SHA-256 em blocos: arquivos vazio e de múltiplos blocos comparados com Get-FileHash; eventos intermediários de progresso verificados.
 - Relatório HTML: tabelas, totais, cobertura, arquivos grandes e escape de caminhos; snapshots parciais com contadores, atualização e encaminhamento ao relatório final.
