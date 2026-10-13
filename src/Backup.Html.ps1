@@ -48,11 +48,12 @@ function Write-BackupHtml {
             $largest=@(($largest + $row) | Sort-Object {[long]$_.Bytes} -Descending | Select-Object -First 10)
         }
     }
-    $scope='Configuração manual'; $coverage=@()
+    $scope='Configuração manual'; $coverage=@(); $quickAudit=$false
     $planPath=Join-Path $Run 'plano.json'
     if (Test-Path -LiteralPath $planPath) {
         $plan=Get-Content -LiteralPath $planPath -Raw | ConvertFrom-Json
         $scope=$plan.Scope
+        if ($plan.PSObject.Properties['QuickAudit']) { $quickAudit=[bool]$plan.QuickAudit }
     }
     $coveragePath=Join-Path $Run 'cobertura.csv'
     if (Test-Path -LiteralPath $coveragePath) { $coverage=@(Import-Csv -LiteralPath $coveragePath) }
@@ -77,6 +78,7 @@ function Write-BackupHtml {
         $null=$html.Append('<div class="card">'+$card[0]+'<strong>'+(ConvertTo-BackupHtmlText $card[1])+'</strong></div>')
     }
     $null=$html.Append('</div><p>Contagem e tamanho representam somente os arquivos encontrados. Erros de acesso podem ocultar arquivos adicionais. Zero erros não significa que todos os dados do computador foram incluídos.</p>')
+    if ($quickAudit) { $null=$html.Append('<p><strong>Auditoria rápida:</strong> arquivos novos sem candidatos de mesmo tamanho não foram lidos para SHA-256. NEEDS_COPY pode ter SHA vazio; isso não é cópia verificada. Para ler todo o conteúdo na auditoria, use -FullAudit.</p>') }
     if ($Scope -eq 'Configuração manual' -and $Sources.Count -eq 1) {
         $null=$html.Append('<div class="banner">Atenção: somente uma pasta foi configurada. Para procurar dados pessoais automaticamente, use a opção Auditoria automática no Iniciar.cmd.</div>')
     }
@@ -94,14 +96,14 @@ function Write-BackupHtml {
     $null=$html.Append('</tbody></table><p>São tamanhos lógicos, não previsão de espaço adicional. Conteúdos iguais podem compartilhar uma cópia. A auditoria não copia arquivos; duplicatas existentes não são apagadas.</p><h2>Cobertura e exclusões</h2>')
     if ($coverage.Count) {
         $null=$html.Append('<div class="scroll"><table><thead><tr><th>Caminho</th><th>Situação</th><th>Motivo</th></tr></thead><tbody>')
-        $translations=@{INCLUDED='Incluído';COVERED='Incluído em outra raiz';EXCLUDED='Não examinado';ERROR='Falha de descoberta'}
+        $translations=@{INCLUDED='Incluído';COVERED='Incluído em outra raiz';EXCLUDED='Não examinado';REVIEW='Revisar: fora do escopo';NOT_FOUND='Pasta opcional ausente';ERROR='Falha de descoberta'}
         foreach ($row in $coverage) {
             $label=$row.Status; if ($translations.ContainsKey($label)) { $label=$translations[$label] }
             $null=$html.Append('<tr><td>'+(ConvertTo-BackupHtmlText $row.Path)+'</td><td>'+(ConvertTo-BackupHtmlText $label)+'</td><td>'+(ConvertTo-BackupHtmlText $row.Reason)+'</td></tr>')
         }
         $null=$html.Append('</tbody></table></div>')
     } else { $null=$html.Append('<p>Execução manual: somente as origens listadas foram examinadas. Nenhuma descoberta automática foi solicitada.</p>') }
-    $null=$html.Append('<p>Não é uma imagem do Windows. Diretórios de Windows e programas listados nas exclusões não são copiados. Users, AppData, ProgramData e pastas próprias dos volumes incluídos são examinados; perfis protegidos podem gerar falhas de acesso. Rede e volumes sem letra não são descobertos automaticamente. Exporte separadamente bancos, e-mail local, certificados, WSL, Docker e máquinas virtuais quando aplicável.</p><h2>Pendências de leitura</h2>')
+    $null=$html.Append('<p>Não é uma imagem do Windows. No modo automático focado, as raízes dos volumes, Users, AppData e ProgramData não são selecionadas por inteiro. Pastas com outros nomes e arquivos soltos exigem revisão e inclusão manual. No modo manual, só as pastas explicitamente escolhidas são examinadas. Rede e volumes sem letra não são descobertos automaticamente. Exporte separadamente bancos, e-mail local, certificados, WSL, Docker e máquinas virtuais quando aplicável.</p><h2>Pendências de leitura</h2>')
     if ($failures.Count) {
         $null=$html.Append('<p>Até 100 pendências exibidas; consulte os CSVs para a lista completa.</p><table><thead><tr><th>Caminho</th><th>Como identificar a falha</th></tr></thead><tbody>')
         foreach ($row in $failures) { $null=$html.Append('<tr><td>'+(ConvertTo-BackupHtmlText $row.Path)+'</td><td>'+(ConvertTo-BackupHtmlText $row.Reason)+'</td></tr>') }

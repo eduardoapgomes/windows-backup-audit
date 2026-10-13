@@ -1,70 +1,95 @@
-﻿function Get-PersonalFolderCandidates {
+# Descoberta orientada a dados: nunca inclui a raiz do perfil ou do disco automaticamente.
+function Get-PersonalFolderCandidates {
     $profile = [Environment]::GetFolderPath('UserProfile')
-    [pscustomobject]@{Path=$profile;Kind='Perfil do usuário atual'}
-    foreach ($name in @('Desktop','MyDocuments','MyPictures','MyMusic','MyVideos')) {
+    foreach ($name in @('Desktop','MyDocuments','MyPictures','MyMusic','MyVideos','Favorites')) {
         $path = [Environment]::GetFolderPath($name)
         if ($path) { [pscustomobject]@{Path=$path;Kind="Pasta pessoal: $name"} }
     }
-    $key = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders'
-    $downloads = (Get-ItemProperty -LiteralPath $key -ErrorAction Stop).'{374DE290-123F-4565-9164-39C4925E467B}'
-    if ($downloads) { [pscustomobject]@{Path=[Environment]::ExpandEnvironmentVariables($downloads);Kind='Downloads'} }
+    $downloads = $null
+    try {
+        $key = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders'
+        $downloads = (Get-ItemProperty -LiteralPath $key -ErrorAction Stop).'{374DE290-123F-4565-9164-39C4925E467B}'
+    } catch { Write-Warning 'Downloads não pôde ser consultado no registro; tentando o caminho padrão.' }
+    if ($downloads) { $downloads = [Environment]::ExpandEnvironmentVariables($downloads) }
+    elseif ($profile) { $downloads = Join-Path $profile 'Downloads' }
+    if ($downloads) { [pscustomobject]@{Path=$downloads;Kind='Downloads'} }
     foreach ($path in @($env:OneDrive,$env:OneDriveConsumer,$env:OneDriveCommercial)) {
         if ($path) { [pscustomobject]@{Path=$path;Kind='OneDrive'} }
     }
+    if ($profile) {
+        foreach ($name in @('Projetos','Projects','Code','Codigo','Código','Repos','Git','Trabalho','Work','Estudos','Dados','Data','Notebooks','Jupyter','Saved Games')) {
+            $path = Join-Path $profile $name
+            if (Test-Path -LiteralPath $path -PathType Container) {
+                [pscustomobject]@{Path=$path;Kind='Pasta de dados/projetos no perfil'}
+            }
+        }
+    }
 }
+
 function Get-AutomaticBackupPlan {
     $rows = New-Object 'Collections.Generic.List[object]'
     $sources = New-Object 'Collections.Generic.List[object]'
-    $exclusions = New-Object 'Collections.Generic.List[string]'
     $candidates = New-Object 'Collections.Generic.List[object]'
-    Write-Host 'Descobrindo volumes internos para varredura completa de dados, incluindo Users...'
+    Write-Host 'Descoberta por pastas de dados: sem varredura integral de C:\, Users ou programas.'
     try { foreach ($item in Get-PersonalFolderCandidates) { $candidates.Add($item) } }
     catch { $rows.Add([pscustomobject]@{Path='Pastas pessoais';Status='ERROR';Reason=$_.Exception.Message}) }
+
+    # Um nível lógico de seleção: testar apenas nomes de pastas de dados no topo
+    # dos volumes internos. Outras pastas e arquivos soltos ficam para revisão.
+    $dataFolders = @('Projetos','Projects','Code','Codigo','Código','Repos','Repositories',
+        'Dados','Data','Documentos','Documents','Trabalho','Work','Estudos',
+        'Fotos','Pictures','Imagens','Videos','Vídeos','Arquivos','Notebooks','Jupyter')
     try {
         foreach ($volume in Get-Volume -ErrorAction Stop) {
             if (-not $volume.DriveLetter) { continue }
-            $path = "$($volume.DriveLetter):\"
+            $root = "$($volume.DriveLetter):\"
             try {
-                $disk = Get-StorageIdentity $path
-                if ($disk.BusType -in @('SATA','ATA','NVMe','SAS','SCSI','RAID') -and
-                    -not $disk.IsOffline) {
-                    $candidates.Add([pscustomobject]@{Path=$path;Kind='Varredura do volume interno (dados fora e dentro de Users)'})
-                    foreach ($name in @('$RECYCLE.BIN','System Volume Information','Recovery','Windows','Program Files','Program Files (x86)','Boot','EFI','Config.Msi','pagefile.sys','swapfile.sys','hiberfil.sys','bootmgr','DumpStack.log','DumpStack.log.tmp')) {
-                        $exclusions.Add(([IO.Path]::Combine($path, $name)))
-                    }
-                } else {
-                    $rows.Add([pscustomobject]@{Path=$path;Status='EXCLUDED';Reason='Mídia externa, volume offline ou tipo não habilitado. Não é origem automática.'})
+                $disk = Get-StorageIdentity $root
+                if ($disk.BusType -notin @('SATA','ATA','NVMe','SAS','SCSI','RAID') -or $disk.IsOffline) {
+                    $rows.Add([pscustomobject]@{Path=$root;Status='EXCLUDED';Reason='Volume externo, offline ou não habilitado como origem automática.'})
+                    continue
                 }
-            } catch { $rows.Add([pscustomobject]@{Path=$path;Status='ERROR';Reason=$_.Exception.Message}) }
+                $rows.Add([pscustomobject]@{Path=$root;Status='REVIEW';Reason='Raiz não examinada: arquivos soltos e pastas com outros nomes exigem inclusão manual. Não é cobertura integral do volume.'})
+                foreach ($name in $dataFolders) {
+                    # Path.Combine não depende da unidade estar montada no instante
+                    # da construção; Test-Path confirma a existência em seguida.
+                    $path = [IO.Path]::Combine($root, $name)
+                    if (Test-Path -LiteralPath $path -PathType Container) {
+                        $candidates.Add([pscustomobject]@{Path=$path;Kind='Pasta de dados identificada no volume interno'})
+                    }
+                }
+            } catch { $rows.Add([pscustomobject]@{Path=$root;Status='ERROR';Reason=$_.Exception.Message}) }
         }
     } catch { $rows.Add([pscustomobject]@{Path='Volumes';Status='ERROR';Reason=$_.Exception.Message}) }
+
     $profile = [Environment]::GetFolderPath('UserProfile')
-    if ($profile) {
-        foreach ($name in @('NTUSER.DAT','ntuser.dat.LOG1','ntuser.dat.LOG2')) { $exclusions.Add(([IO.Path]::Combine($profile, $name))) }
-    }
-    # Parents first; known folders outside the profile remain separate roots.
     foreach ($candidate in ($candidates | Sort-Object @{Expression={$_.Path.Length}},Path)) {
-        $path = $candidate.Path
+        $path = [string]$candidate.Path
         try {
             Assert-PlainPath $path -AllowCloudSource
-            if (-not (Test-Path -LiteralPath $path -PathType Container)) { throw 'Pasta não encontrada.' }
-            $covered = @($sources | Where-Object { Test-PathWithin $path $_.Path }).Count -gt 0
-            $excluded = @($exclusions | Where-Object { Test-PathWithin $path $_ }).Count -gt 0
-            if ($excluded) {
-                $rows.Add([pscustomobject]@{Path=$path;Status='EXCLUDED';Reason='Pasta de software/sistema excluída explicitamente.'})
-            } elseif ($covered) {
-                $rows.Add([pscustomobject]@{Path=$path;Status='COVERED';Reason='Incluída em uma raiz já descoberta.'})
-            } else {
-                $sha = [Security.Cryptography.SHA256]::Create()
-                try { $id = [BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($path.ToUpperInvariant()))).Replace('-','').Substring(0,16) }
-                finally { $sha.Dispose() }
-                $sources.Add([pscustomobject]@{Id="AUTO_$id";Path=$path})
-                $rows.Add([pscustomobject]@{Path=$path;Status='INCLUDED';Reason=$candidate.Kind})
+            $normalized = [IO.Path]::GetFullPath($path).TrimEnd('\','/')
+            $root = [IO.Path]::GetPathRoot($normalized).TrimEnd('\','/')
+            if ($normalized -eq $root -or ($profile -and $normalized -ieq $profile.TrimEnd('\','/'))) {
+                $rows.Add([pscustomobject]@{Path=$path;Status='REVIEW';Reason='Raiz ampla demais; escolha subpastas de dados explicitamente.'})
+                continue
             }
+            if (-not (Test-Path -LiteralPath $path -PathType Container)) {
+                $rows.Add([pscustomobject]@{Path=$path;Status='NOT_FOUND';Reason='Pasta opcional ausente; confira se há dados em outro local.'})
+                continue
+            }
+            $covered = @($sources | Where-Object { Test-PathWithin $path $_.Path }).Count -gt 0
+            if ($covered) {
+                $rows.Add([pscustomobject]@{Path=$path;Status='COVERED';Reason='Incluída em outra pasta de dados já selecionada.'})
+                continue
+            }
+            $sha = [Security.Cryptography.SHA256]::Create()
+            try { $id = [BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($normalized.ToUpperInvariant()))).Replace('-','').Substring(0,16) }
+            finally { $sha.Dispose() }
+            $sources.Add([pscustomobject]@{Id="AUTO_$id";Path=$path})
+            $rows.Add([pscustomobject]@{Path=$path;Status='INCLUDED';Reason=$candidate.Kind})
         } catch { $rows.Add([pscustomobject]@{Path=$path;Status='ERROR';Reason=$_.Exception.Message}) }
     }
-    foreach ($path in $exclusions) { $rows.Add([pscustomobject]@{Path=$path;Status='EXCLUDED';Reason='Exclusão automática explícita: sistema/aplicativos. Não representa backup desses dados.'}) }
-    if (-not $sources.Count) { throw 'Nenhuma origem automática disponível. Configure origens manualmente.' }
+    if (-not $sources.Count) { throw 'Nenhuma pasta de dados encontrada. Use a opção 3 para selecionar suas pastas manualmente.' }
     $rows | Format-Table Path,Status,Reason -AutoSize | Out-Host
-    [pscustomobject]@{Destination='';Sources=$sources.ToArray();Discovery=$rows.ToArray();ExcludedPaths=$exclusions.ToArray()}
+    [pscustomobject]@{Destination='';Sources=$sources.ToArray();Discovery=$rows.ToArray();ExcludedPaths=@()}
 }

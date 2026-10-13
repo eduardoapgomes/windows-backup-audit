@@ -5,7 +5,7 @@ O objetivo é encontrar dados espalhados sem comprometer o backup. A cópia cons
 ## Abrir sem editar configuração
 
 1. Instale Python 3.9 ou superior pelo instalador oficial: https://www.python.org/downloads/windows/ (se já usa Python/Anaconda, pode usar seu terminal com Python disponível). Nenhum pacote pip é necessário.
-2. Atualize o projeto e abra `Iniciar.cmd`.
+2. [Atualize o projeto pela branch `main`](ATUALIZAR.md) e abra `Iniciar.cmd`.
 3. Escolha **8 — Mapa visual e agrupamentos**.
 4. Selecione `inventario.csv` da execução desejada. Ele fica na pasta de relatórios indicada pelo backup. Pode estar ainda em produção: nesse caso tudo é parcial.
 5. O navegador abre o painel local. A janela permanece acompanhando o CSV a cada 30 segundos; Ctrl+C encerra somente esse acompanhamento. A auditoria/backup em outra janela continua.

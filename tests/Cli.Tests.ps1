@@ -13,8 +13,8 @@ function New-BackupConfiguration { param($Path) Write-Output ('SETUP:' + $Path) 
 function Get-AutomaticBackupPlan { [pscustomobject]@{Destination='';Sources=@(@{Id='AUTO';Path='C:\Personal'});Discovery=@();ExcludedPaths=@()} }
 function Select-BackupDestination { param($Sources) 'E:\Chosen' }
 function Invoke-BackupPlan {
-    param($Sources, $Destination, $Mode, $Discovery, $ExcludedPaths, $Scope, [switch]$OpenReport, $DependencyPolicy)
-    Write-Output ("PLAN:" + $Sources[0].Id + ":" + $Mode + ":" + $Destination)
+    param($Sources, $Destination, $Mode, $Discovery, $ExcludedPaths, $Scope, [switch]$OpenReport, $DependencyPolicy, [switch]$QuickAudit)
+    Write-Output ("PLAN:" + $Sources[0].Id + ":" + $Mode + ":" + $Destination + ":QUICK=" + [bool]$QuickAudit + ":POLICY=" + $DependencyPolicy)
 }
 Export-ModuleMember -Function *
 '@ | Set-Content -LiteralPath (Join-Path $fixture 'src\Backup.Core.psm1') -Encoding UTF8
@@ -24,11 +24,16 @@ Export-ModuleMember -Function *
     It 'discovers automatically without a config and ignores a manual project-only config' {
         $output = & powershell.exe -NoProfile -STA -File "$fixture\Backup.ps1" -AutoDiscover -Mode Audit
         $LASTEXITCODE | Should -Be 0
-        ($output -join '') | Should -Be 'PLAN:AUTO:Audit:E:\Chosen'
+        ($output -join '') | Should -Be 'PLAN:AUTO:Audit:E:\Chosen:QUICK=True:POLICY=Exclude'
         Remove-Item -LiteralPath "$fixture\backup.local.json"
         $output = & powershell.exe -NoProfile -STA -File "$fixture\Backup.ps1" -AutoDiscover -Mode Audit
         $LASTEXITCODE | Should -Be 0
-        ($output -join '') | Should -Be 'PLAN:AUTO:Audit:E:\Chosen'
+        ($output -join '') | Should -Be 'PLAN:AUTO:Audit:E:\Chosen:QUICK=True:POLICY=Exclude'
+    }
+    It 'allows explicit full hashing when the user asks for it' {
+        $output = & powershell.exe -NoProfile -STA -File "$fixture\Backup.ps1" -AutoDiscover -Mode Audit -FullAudit
+        $LASTEXITCODE | Should -Be 0
+        ($output -join '') | Should -Be 'PLAN:AUTO:Audit:E:\Chosen:QUICK=False:POLICY=Exclude'
     }
     It 'routes setup to the script-local configuration without starting a backup' {
         $output = & powershell.exe -NoProfile -STA -File "$fixture\Backup.ps1" -Setup
@@ -38,14 +43,14 @@ Export-ModuleMember -Function *
     It 'loads the default config beside the script with -File and -SelectDestination' {
         $output = & powershell.exe -NoProfile -STA -File "$fixture\Backup.ps1" -Mode Audit -SelectDestination
         $LASTEXITCODE | Should -Be 0
-        ($output -join '') | Should -Be 'PLAN:DEFAULT:Audit:E:\Chosen'
+        ($output -join '') | Should -Be 'PLAN:DEFAULT:Audit:E:\Chosen:QUICK=False:POLICY=Auto'
     }
     It 'honors a relative explicit config without depending on the caller directory' {
         '{"Destination":"E:\\Custom","Sources":[{"Id":"CUSTOM","Path":"C:\\Data"}]}' |
             Set-Content -LiteralPath "$fixture\custom.json" -Encoding UTF8
         $output = & powershell.exe -NoProfile -STA -File "$fixture\Backup.ps1" -Mode Audit -Config custom.json
         $LASTEXITCODE | Should -Be 0
-        ($output -join '') | Should -Be 'PLAN:CUSTOM:Audit:E:\Custom'
+        ($output -join '') | Should -Be 'PLAN:CUSTOM:Audit:E:\Custom:QUICK=False:POLICY=Auto'
     }
     It 'exits with code 2 and an actionable path when config is missing' {
         Remove-Item -LiteralPath "$fixture\backup.local.json"
