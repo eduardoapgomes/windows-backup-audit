@@ -11,7 +11,7 @@ BeforeAll {
     }
     function Invoke-TestUpdater {
         param([string]$Path)
-        $lines = @(& cmd.exe /d /c ('call "' + $Path + '" --no-pause 2>nul'))
+        $lines = @(& cmd.exe /d /c ('call "' + $Path + '" --no-pause 2>&1'))
         [pscustomobject]@{Output=$lines;ExitCode=$LASTEXITCODE}
     }
 }
