@@ -1,5 +1,7 @@
 @echo off
 setlocal EnableExtensions
+rem Capturar antes de CALL :label: dentro da subrotina %%0 e o rotulo, nao o arquivo.
+set "PROJECT_DIR=%~dp0"
 call :atualizar
 set "UPDATE_EXIT=%ERRORLEVEL%"
 echo.
@@ -7,7 +9,7 @@ if /I not "%~1"=="--no-pause" pause
 exit /b %UPDATE_EXIT%
 
 :atualizar
-cd /d "%~dp0"
+cd /d "%PROJECT_DIR%"
 if errorlevel 1 (
     echo ERRO: nao foi possivel abrir a pasta do programa.
     exit /b 2
@@ -19,24 +21,24 @@ echo Esta operacao NAO altera arquivos no HD externo.
 echo.
 where git >nul 2>&1
 if errorlevel 1 goto semgit
-if not exist "%~dp0.git" goto zip
+if not exist "%PROJECT_DIR%.git" goto zip
 
 set "BRANCH="
-for /f "delims=" %%B in ('git -C "%~dp0" branch --show-current 2^>nul') do set "BRANCH=%%B"
+for /f "delims=" %%B in ('git -C "%PROJECT_DIR%" branch --show-current 2^>nul') do set "BRANCH=%%B"
 if not defined BRANCH goto falha_git
 if /I not "%BRANCH%"=="main" goto outra_branch
 
 rem Nunca descartar alteracoes locais ou fazer merge automatico.
-git -C "%~dp0" diff --quiet
+git -C "%PROJECT_DIR%" diff --quiet
 if errorlevel 1 goto alteracoes
-git -C "%~dp0" diff --cached --quiet
+git -C "%PROJECT_DIR%" diff --cached --quiet
 if errorlevel 1 goto alteracoes
 
 echo Atualizando a branch main do repositorio origin...
-git -C "%~dp0" pull --ff-only origin main
+git -C "%PROJECT_DIR%" pull --ff-only origin main
 if errorlevel 1 goto falha_git
-if not exist "%~dp0Backup.ps1" goto incompleto
-if not exist "%~dp0src\Backup.Core.psm1" goto incompleto
+if not exist "%PROJECT_DIR%Backup.ps1" goto incompleto
+if not exist "%PROJECT_DIR%src\Backup.Core.psm1" goto incompleto
 echo.
 echo ATUALIZADO: os arquivos principais estao presentes.
 echo A configuracao backup.local.json e os backups no USB nao foram alterados.
