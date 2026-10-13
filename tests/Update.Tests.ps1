@@ -11,7 +11,8 @@ BeforeAll {
     }
     function Invoke-TestUpdater {
         param([string]$Path)
-        & cmd.exe /d /c ('call "' + $Path + '" --no-pause 2>nul')
+        $lines = @(& cmd.exe /d /c ('call "' + $Path + '" --no-pause 2>nul'))
+        [pscustomobject]@{Output=$lines;ExitCode=$LASTEXITCODE}
     }
 }
 Describe 'Safe one-click updater' {
@@ -20,9 +21,9 @@ Describe 'Safe one-click updater' {
         $path = Join-Path $dir.FullName 'Atualizar.cmd'
         Copy-Item -LiteralPath $updater -Destination $path
         Set-Content -LiteralPath (Join-Path $dir.FullName 'backup.local.json') -Value 'my config'
-        $output = Invoke-TestUpdater -Path $path
-        $LASTEXITCODE | Should -Be 2
-        ($output -join ' ') | Should -Match 'ZIP'
+        $result = Invoke-TestUpdater -Path $path
+        $result.ExitCode | Should -Be 2
+        ($result.Output -join ' ') | Should -Match 'ZIP'
         (Get-Content -LiteralPath (Join-Path $dir.FullName 'backup.local.json') -Raw) | Should -Match 'my config'
     }
 
@@ -54,15 +55,15 @@ Describe 'Safe one-click updater' {
         Invoke-FixtureGit ('git -C "' + $other + '" push origin main')
 
         Set-Content -LiteralPath (Join-Path $client 'backup.local.json') -Value 'private config'
-        $output = Invoke-TestUpdater -Path (Join-Path $client 'Atualizar.cmd')
-        $LASTEXITCODE | Should -Be 0
+        $result = Invoke-TestUpdater -Path (Join-Path $client 'Atualizar.cmd')
+        $result.ExitCode | Should -Be 0
         (Test-Path -LiteralPath (Join-Path $client 'new-version.txt')) | Should -BeTrue
         (Get-Content -LiteralPath (Join-Path $client 'backup.local.json') -Raw) | Should -Match 'private config'
 
         Set-Content -LiteralPath (Join-Path $client 'Backup.ps1') -Value '# user change'
-        $output = Invoke-TestUpdater -Path (Join-Path $client 'Atualizar.cmd')
-        $LASTEXITCODE | Should -Be 3
-        ($output -join ' ') | Should -Match 'modificacoes locais'
+        $result = Invoke-TestUpdater -Path (Join-Path $client 'Atualizar.cmd')
+        $result.ExitCode | Should -Be 3
+        ($result.Output -join ' ') | Should -Match 'modificacoes locais'
         (Get-Content -LiteralPath (Join-Path $client 'Backup.ps1') -Raw) | Should -Match 'user change'
     }
 }
