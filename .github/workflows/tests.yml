@@ -48,3 +48,12 @@ jobs:
             Write-Host ("::error title={0}::{1}" -f (EscapeProp ([string]$b.Name + [string]$b.Item)), (Escape $msg))
           }
           if ($r.Result -ne 'Passed') { exit 1 }
+      - name: Desempenho (versão 2 x versão 1)
+        if: matrix.shell == 'powershell'
+        continue-on-error: true
+        run: |
+          $v1 = Join-Path $env:RUNNER_TEMP 'v1'
+          cmd /c "git fetch --depth=1 origin 46dad4da187df10f9641580db7dbeda7fda043a3 2>&1"
+          cmd /c "git archive --format=zip -o $v1.zip 46dad4da187df10f9641580db7dbeda7fda043a3 src 2>&1"
+          Expand-Archive -LiteralPath "$v1.zip" -DestinationPath $v1 -Force
+          .\tests\Comparar-Desempenho.ps1 -VersaoAnterior $v1

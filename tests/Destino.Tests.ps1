@@ -25,7 +25,7 @@ Describe 'Regras do HD de destino (metadados de disco simulados)' {
         { Assert-DestinoSeguro 'C:\Backup' @() } | Should -Throw '*não é um HD externo USB*'
         { Assert-DestinoSeguro 'H:\Backup' @() } | Should -Throw '*Windows está instalado*'
         { Assert-DestinoSeguro 'G:\Backup' @() } | Should -Throw '*NTFS*'
-        { Assert-DestinoSeguro 'K:\Backup' @() } | Should -Throw '*protegido contra gravação*'
+        { Assert-DestinoSeguro 'K:\Backup' @() } | Should -Throw '*contra gravação*'
         { Assert-DestinoSeguro 'L:\Backup' @() } | Should -Throw '*identidade*'
     }
     It 'recusa outra partição do mesmo disco físico da origem' {

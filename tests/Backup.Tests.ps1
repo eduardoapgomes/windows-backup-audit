@@ -267,11 +267,13 @@ Describe 'Motor nativo' {
         $f.ExcluiArquivo('doc.docx', 'C:\doc.docx') | Should -BeFalse
     }
     It 'reconhece tags de nuvem e de link' {
-        foreach ($v in 0..15) { [WindowsBackupAudit.Nativo]::EhNuvem([uint32](0x9000001A + $v * 0x1000)) | Should -BeTrue }
-        [WindowsBackupAudit.Nativo]::EhLink([uint32]0xA0000003) | Should -BeTrue    # junction
-        [WindowsBackupAudit.Nativo]::EhLink([uint32]0xA000000C) | Should -BeTrue    # symlink
-        [WindowsBackupAudit.Nativo]::EhLink([uint32]0x80000017) | Should -BeFalse   # WOF (arquivo comprimido)
-        [WindowsBackupAudit.Nativo]::EhLink([uint32]0x9000001A) | Should -BeFalse   # OneDrive
+        # Sufixo L: sem ele o PowerShell lê 0x9000001A como Int32 negativo.
+        foreach ($v in 0..15) { [WindowsBackupAudit.Nativo]::EhNuvem([uint32](0x9000001AL + $v * 0x1000)) | Should -BeTrue }
+        [WindowsBackupAudit.Nativo]::EhNuvem([uint32]0xA0000003L) | Should -BeFalse
+        [WindowsBackupAudit.Nativo]::EhLink([uint32]0xA0000003L) | Should -BeTrue    # junction
+        [WindowsBackupAudit.Nativo]::EhLink([uint32]0xA000000CL) | Should -BeTrue    # symlink
+        [WindowsBackupAudit.Nativo]::EhLink([uint32]0x80000017L) | Should -BeFalse   # WOF (arquivo comprimido)
+        [WindowsBackupAudit.Nativo]::EhLink([uint32]0x9000001AL) | Should -BeFalse   # OneDrive
     }
     It 'calcula SHA-256 igual ao Get-FileHash' {
         $p = Join-Path $TestDrive 'hash.bin'

@@ -1,107 +1,128 @@
 # Windows Backup Audit
 
-**Backup de informação pessoal no Windows, com auditoria antes da cópia e verificação SHA-256.** A prioridade é proteger documentos, fotos, vídeos e projetos, **não copiar a instalação do Windows**.
+[![Testes no Windows](https://github.com/eduardoapgomes/windows-backup-audit/actions/workflows/tests.yml/badge.svg)](https://github.com/eduardoapgomes/windows-backup-audit/actions/workflows/tests.yml)
 
-> **Importante:** o modo automático é **focado**, não uma busca exaustiva de todos os discos. Pastas fora do escopo precisam ser incluídas manualmente. Não formate o computador apenas porque um relatório não mostra erros.
+**Backup sistemático das suas pastas para um HD externo — rápido, conferido arquivo por arquivo e sem apagar nada.**
 
-## Instalar e atualizar sem misturar versões
+Para Windows 10 e 11. Não precisa instalar nada além do próprio programa: usa o PowerShell e o Robocopy que já vêm no Windows.
 
-**Primeira instalação:** para receber atualizações em um clique, instale [Git para Windows](https://git-scm.com/downloads/win) e, no PowerShell, execute:
+- **Copia só o que mudou.** A primeira vez copia tudo; nas seguintes, só os arquivos novos ou alterados — normalmente minutos.
+- **Confere cada cópia.** Depois de copiar, lê o arquivo na origem e no HD e compara o SHA-256 (a “impressão digital” do conteúdo).
+- **Nunca apaga e nunca sobrescreve.** Quando um arquivo muda, a versão antiga do backup vai para `_VERSOES_ANTERIORES`. Arquivos apagados no computador continuam no HD.
+- **Pasta renomeada não é copiada de novo.** O programa percebe que é o mesmo conteúdo e só move a cópia dentro do HD.
+- **O backup é uma cópia comum de pastas.** Para restaurar, basta abrir o HD no Explorador de Arquivos. Nenhum formato especial.
 
-```powershell
-New-Item -ItemType Directory -Force "$env:USERPROFILE\Projetos" | Out-Null
-Set-Location "$env:USERPROFILE\Projetos"
-git clone --branch main https://github.com/eduardoapgomes/windows-backup-audit.git
-Set-Location .\windows-backup-audit
-.\Iniciar.cmd
-```
+## Começar em 4 passos
 
-**Já tem uma instalação Git?** Feche o programa e dê dois cliques em **`Atualizar.cmd`**. Ele atualiza somente a branch `main` com `git pull --ff-only`, sem descartar alterações locais. Se preferir o terminal, dentro da pasta do projeto use `git pull --ff-only origin main`. **Não execute `git clone` dentro de uma pasta que já existe.**
+1. **Instale.** Baixe o [ZIP](https://github.com/eduardoapgomes/windows-backup-audit/archive/refs/heads/main.zip) e extraia **a pasta inteira** em um lugar fixo (por exemplo, `Documentos\windows-backup-audit`). Quem usa Git pode clonar; veja [Instalar e atualizar](docs/ATUALIZAR.md).
+2. **Configure.** Conecte o **HD externo USB (NTFS)**, abra **`Iniciar.cmd`** e escolha **4 – Configurar**. O programa sugere suas pastas (Documentos, Área de Trabalho, Imagens, Vídeos, Downloads, OneDrive, Projetos…), pergunta qual HD usar e abre a lista no Bloco de Notas para você conferir.
+3. **Simule e faça o backup.** Escolha **2 – Simular** para ver quanto será copiado, sem gravar nada. Depois **1 – Fazer backup**. Ao terminar, o relatório abre no navegador.
+4. **Torne sistemático.** Escolha **5 – Agendar** (toda semana ou todo dia). Uma vez por mês, use **3 – Verificar integridade**. Abra de vez em quando alguns arquivos direto do HD.
 
-**Baixou ZIP ou apareceu “Backup.ps1 não existe”?** Baixe o [ZIP atualizado da `main`](https://github.com/eduardoapgomes/windows-backup-audit/archive/refs/heads/main.zip), **extraia inteiro em uma pasta nova**, confirme que `Iniciar.cmd`, `Backup.ps1` e `src\Backup.Core.psm1` estão juntos. Se usar modo manual, copie apenas `backup.local.json` da instalação antiga. **Não apague o backup no USB.** Não é necessário instalar Git nem Python para executar a auditoria e o backup.
+Passo a passo detalhado e solução de problemas: **[Guia rápido](docs/GUIA-RAPIDO.md)**.
 
-[Instalação, atualização e correção de erros — passo a passo](docs/ATUALIZAR.md).
+## Menu
 
-## Comece em 4 passos
-
-1. No Windows 10/11, conecte um **HD/SSD USB externo NTFS**. Use a instalação Git ou extraia o ZIP **inteiro em uma pasta nova**. Confira que `Backup.ps1` existe ao lado de `Iniciar.cmd`.
-2. Abra **Iniciar.cmd**, opção **1 — Auditoria automática**. Selecione o destino externo. **Não copia arquivos de origem.**
-3. Abra o **LEIA-ME.html** gerado, confira as pastas **INCLUDED**, os avisos **REVIEW**, arquivos **NEEDS_COPY** e erros. Adicione pastas importantes que ficaram de fora usando a opção **3**.
-4. Só depois use a opção **2 — Backup automático**, no **mesmo destino**. Confira o novo relatório e **teste restaurar alguns arquivos**.
-
-[Guia rápido e solução de problemas](docs/GUIA-RAPIDO.md).
-
-### O que o modo automático examina
-
-- Pastas conhecidas do usuário atual: Documentos, Área de Trabalho, Downloads, Imagens, Música, Vídeos, Favoritos e OneDrive quando disponível.
-- Pastas de dados/projetos com nomes reconhecidos, como **Projetos, Projects, Code, Repos, Dados, Data, Trabalho, Work, Estudos, Notebooks**, no perfil e no topo dos volumes internos.
-- **Não percorre** automaticamente a raiz de `C:\`, `C:\Users`, `AppData`, `Program Files`, `Windows`, caches ou todas as pastas de software. Outros nomes e arquivos soltos nas raízes dos discos são sinalizados para **REVIEW**, não declarados protegidos.
-
-Uma pasta com nome incomum pode conter dados importantes: **inclua-a pelo modo manual**. O modo automático não substitui essa revisão.
-
-### Como a auditoria ficou mais rápida
-
-1. **Top-down:** seleciona as raízes úteis antes de enumerar arquivos. Bibliotecas Node/Python reconhecidas e caches gerados são ignorados no padrão automático `Exclude`; projetos, notebooks, arquivos de código próprio e manifests continuam elegíveis.
-2. **Metadados primeiro:** na auditoria automática, se não existe arquivo de mesmo tamanho no backup, registra `NEEDS_COPY` **sem ler o arquivo inteiro para SHA-256**. Havendo candidatos de mesmo tamanho, usa SHA-256 para confirmar igualdade. Use `-FullAudit` se quiser hash de todos os arquivos da auditoria.
-3. **Backup sem atalhos:** o modo Backup continua calculando SHA-256 e verificando cada cópia/reutilização antes de confirmá-la. Nenhum arquivo é excluído ou movido por similaridade.
-
-**Merkle** compara hierarquicamente os inventários observados; **MinHash/LSH** sugere relações entre pastas no mapa opcional (opção 8, Python 3.9+). Nenhum deles é usado para pular a verificação de um backup. [Detalhes técnicos](docs/INCREMENTAL.md).
-
-## Entenda os resultados
-
-| Status | Significado |
+| Opção | O que faz |
 |---|---|
-| `NEEDS_COPY` | Precisa copiar. **Não é backup concluído.** Na auditoria rápida, o SHA pode estar vazio. |
-| `VERIFIED` | Arquivo copiado e conferido no modo Backup. |
-| `SKIP_IDENTICAL` | Cópia idêntica encontrada no destino esperado, conferida. |
-| `REUSED_EXISTING` | Conteúdo igual encontrado em outro caminho do destino, conferido. |
-| `ERROR` | Falha que exige revisão. |
-| `REVIEW` (em `cobertura.csv`) | Local **fora do escopo automático**, não auditado. |
-| `PARCIAL` | Execução interrompida ou ainda em andamento. **Não prova cobertura nem conclusão.** |
+| **1. Fazer backup agora** | Copia o que é novo ou mudou, guarda versões anteriores e confere tudo por SHA-256 |
+| **2. Simular** | Mostra o que seria copiado, atualizado ou movido. **Não grava nada no HD** |
+| **3. Verificar integridade** | Relê o HD e confere cada arquivo com o SHA-256 registrado quando foi copiado |
+| **4. Configurar** | Cria ou edita `configuracao.txt` (pastas, HD de destino, exclusões) |
+| **5. Agendar** | Cria ou remove o backup automático no Agendador de Tarefas do Windows |
+| **6. Abrir o último relatório** | Abre o relatório da última execução gravado no HD |
 
-Relatórios: `DESTINO\_RELATORIOS\ID\LEIA-ME.html`, `inventario.csv`, `cobertura.csv`, `resumo.json` e, quando aplicável, `dependencias.csv`, `merkle.json`, `metricas.json`. **Não publique relatórios com caminhos pessoais.**
+## A configuração é um texto simples
 
-## Seleção manual ou uso avançado
+`configuracao.txt` fica na pasta do programa e pode ser editado no Bloco de Notas — sem aspas, sem barras duplicadas ([exemplo completo](configuracao.exemplo.txt)):
 
-No menu, **3** configura pastas, **4** audita a seleção e **5** faz o backup dela. É a melhor opção para pastas com nomes incomuns, dados de aplicativos, outras unidades ou um escopo exato. A configuração fica em `backup.local.json` e não deve ser enviada ao GitHub.
+```ini
+[DESTINO]
+E:\BACKUP_WINDOWS\MEU-PC-ana
 
-Comandos opcionais:
+[ORIGENS]
+C:\Users\ana\Documents
+C:\Users\ana\Pictures
+D:\Projetos > D_Projetos
 
-```powershell
-# Auditoria automática focada e rápida
-powershell.exe -NoProfile -STA -File .\Backup.ps1 -Mode Audit -AutoDiscover -SelectDestination -OpenReport
+[EXCLUIR_PASTAS]
+node_modules
+__pycache__
 
-# Auditoria automática com hash de todos os arquivos selecionados
-powershell.exe -NoProfile -STA -File .\Backup.ps1 -Mode Audit -AutoDiscover -FullAudit -SelectDestination
-
-# Backup automático (hash e verificação obrigatórios)
-powershell.exe -NoProfile -STA -File .\Backup.ps1 -Mode Backup -AutoDiscover -SelectDestination -OpenReport
-
-# Inspecionar também bibliotecas regeneráveis, conscientemente
-powershell.exe -NoProfile -STA -File .\Backup.ps1 -Mode Audit -AutoDiscover -FullAudit -DependencyPolicy Include -SelectDestination
+[EXCLUIR_ARQUIVOS]
+~$*
+*.tmp
 ```
 
-O destino precisa ser USB/NTFS, fora das origens e em disco físico diferente. Não existe opção de desativar essa proteção. Para arquivos de nuvem, mantenha o conteúdo disponível localmente. Feche aplicativos que estejam escrevendo arquivos; bancos, WSL, máquinas virtuais e perfis de programas exigem exportações próprias.
+Cada linha de `[ORIGENS]` vira uma pasta no HD. `> Nome` escolhe outro nome. Se a letra do HD mudar (E: hoje, F: amanhã), o programa encontra a mesma pasta sozinho.
 
-## Falta energia, ou o menu diz que terminou?
+## O que fica no HD
 
-Se a energia acabou, **não confie no relatório parcial como backup concluído**. Confira o destino e execute novamente depois de revisar as pastas: arquivos existentes só são reutilizados quando a comparação de conteúdo confirma igualdade. Não apague arquivos `.history-*` nem pastas de staging manualmente sem análise.
-
-Se o menu informar que `Backup.ps1` não existe, confirme que `Iniciar.cmd`, `Backup.ps1` e a pasta `src` estão na mesma instalação; extraia o ZIP completo. Uma mensagem de falha **não é sucesso**.
-
-## Limites, segurança e testes
-
-Este projeto **não é imagem do Windows, snapshot VSS nem sistema completo de restauração**. Ele não assegura consistência de bancos abertos, permissões/ACLs, certificados, EFS ou dados que ficaram fora das pastas selecionadas. Antes de formatar: revisar cobertura, resolver erros, manter segunda cópia e testar restauração.
-
-- [Instalar e atualizar](docs/ATUALIZAR.md) · [Guia rápido](docs/GUIA-RAPIDO.md) · [Cobertura e aplicativos especiais](docs/COVERAGE.md) · [Segurança, interrupções e retomada](docs/SAFETY.md)
-- [Merkle, MinHash e custos](docs/INCREMENTAL.md) · [Mapa visual opcional](docs/ORGANIZATION.md) · [Validação e testes](docs/VALIDATION.md)
-- [Pesquisa de agrupamentos](docs/HIERARCHY.md) · [Publicação segura](docs/GITHUB.md)
-
-Testes de desenvolvimento (Windows PowerShell 5.1, Pester 5.7.1):
-
-```powershell
-Install-Module Pester -RequiredVersion 5.7.1 -Scope CurrentUser -Force
-Invoke-Pester .\tests -Output Detailed
+```text
+E:\BACKUP_WINDOWS\MEU-PC-ana\
+├── Documents\                     cópia comum da pasta Documents
+├── Pictures\
+├── D_Projetos\
+├── _VERSOES_ANTERIORES\           versões antigas de arquivos que mudaram (por data)
+├── _CONTROLE\
+│   ├── manifestos\                SHA-256, tamanho e data de cada arquivo conferido
+│   ├── execucoes\<data>\          RELATORIO.html, detalhes.tsv, resumo.json, logs do Robocopy
+│   └── ULTIMO-RELATORIO.html      atalho para o relatório mais recente
+└── LEIA-ME.txt                    explica esta estrutura para quem abrir o HD
 ```
 
-Licença MIT. O código não formata discos, não usa Robocopy /MIR ou /PURGE e não remove arquivos de origem.
+## Como ler o resultado
+
+| No relatório | Significado |
+|---|---|
+| **Sem mudança** | Já estava no backup, igual. Não foi lido de novo |
+| **Copiados** | Arquivos novos, copiados e conferidos |
+| **Atualizados** | Mudaram desde o último backup; a versão anterior está em `_VERSOES_ANTERIORES` |
+| **Movidos** | Só mudaram de pasta ou de nome; a cópia foi movida no HD e conferida |
+| **Conferidos** | Já estavam no HD (backup antigo ou execução interrompida) e foram conferidos por SHA-256 |
+| **Só na nuvem** | Arquivos do OneDrive não baixados neste computador: **não foram copiados** (aviso) |
+| **Erros** | **Não estão no backup**: arquivo aberto em outro programa, pasta sem permissão, HD desconectado |
+
+O menu e o `Backup.ps1` terminam com um código: **0** tudo certo · **1** avisos (só na nuvem) · **2** erros ou interrompido · **3** não executado (configuração ou HD).
+
+## Segurança
+
+- **Destino só em HD externo USB, NTFS**, em disco físico diferente das pastas copiadas, que não seja o disco do Windows. Não há opção para desligar essa verificação.
+- O Robocopy só cria arquivos que **não existem** no HD (`/XC /XN /XO`); não usa `/MIR` nem `/PURGE`. A versão antiga de um arquivo alterado é **movida** para `_VERSOES_ANTERIORES` antes da cópia nova.
+- Cada cópia é conferida por SHA-256 lendo a origem e o HD. O manifesto tem seu próprio SHA-256 e é gravado de forma atômica; se for danificado, o programa confere tudo de novo em vez de confiar nele.
+- Antes de gravar, confere que o HD ainda é o mesmo (identidade do disco). Duas execuções no mesmo HD ao mesmo tempo são bloqueadas.
+- Arquivos “só na nuvem” não são baixados; links e junções do Windows não são seguidos.
+
+**Limites:** não é imagem do Windows nem snapshot (VSS); arquivos abertos e bancos de dados em uso podem falhar ou ficar inconsistentes — feche os programas antes. Permissões (ACLs) não são copiadas. Detalhes, ransomware e boas práticas: **[Segurança](docs/SEGURANCA.md)**.
+
+## Por que é rápido
+
+- Lista pastas lendo **só nomes, tamanhos e datas** (API nativa do Windows), sem abrir arquivos.
+- Arquivo com mesmo tamanho e data já registrado no manifesto **não é lido de novo**.
+- O **Robocopy multithread** (`/MT:8`) copia; nada de um processo por arquivo.
+- SHA-256 pela criptografia do Windows (usa as instruções SHA da CPU quando existem), lendo **origem e HD ao mesmo tempo**; arquivos pequenos são conferidos em paralelo.
+- Bibliotecas e caches regeneráveis (`node_modules`, `__pycache__`, `.venv`…) ficam fora por padrão. `.git` **não** é excluído: o histórico local de um repositório é dado seu.
+
+Como tudo funciona, passo a passo, e quais ideias do relatório de pesquisa foram adotadas (e quais não, e por quê): **[Como funciona](docs/COMO-FUNCIONA.md)**.
+
+## Documentação
+
+- [Guia rápido](docs/GUIA-RAPIDO.md) — uso passo a passo e solução de problemas
+- [Restaurar arquivos](docs/RESTAURAR.md) — um arquivo, uma versão antiga ou o computador inteiro
+- [Segurança](docs/SEGURANCA.md) — garantias, limites, ransomware, criptografia do HD
+- [Como funciona](docs/COMO-FUNCIONA.md) — fluxo, manifesto, Robocopy, decisões técnicas
+- [Instalar e atualizar](docs/ATUALIZAR.md) — inclusive vindo da versão 1
+- [Testes](docs/TESTES.md) — testes automáticos e roteiro de teste com o seu HD
+- [Mudanças](CHANGELOG.md)
+
+## Linha de comando
+
+```powershell
+.\Backup.ps1 -Acao Simular
+.\Backup.ps1 -Acao Backup
+.\Backup.ps1 -Acao Verificar -Amostra 10     # confere ~10% dos arquivos, sorteados
+.\Backup.ps1 -Acao Backup -Threads 16        # mais threads no Robocopy (SSD rápido)
+Get-Help .\Backup.ps1 -Detailed
+```
+
+Licença MIT. Não publique `configuracao.txt` nem relatórios: eles contêm caminhos pessoais.
