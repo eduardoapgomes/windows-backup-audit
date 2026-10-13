@@ -1,240 +1,283 @@
-﻿BeforeAll {
-    Import-Module "$PSScriptRoot/../src/Backup.Core.psm1" -Force
+﻿# Testes de ponta a ponta com Robocopy e sistema de arquivos reais.
+# Só a identificação física do HD é simulada (o servidor de testes não tem HD USB).
+BeforeAll {
+    Import-Module (Join-Path $PSScriptRoot '..\src\Backup.Core.psm1') -Force -DisableNameChecking
 
-}
-Describe 'Physical destination policy (synthetic disk metadata)' {
-    BeforeEach {
-        Mock Get-StorageIdentity -ModuleName Backup.Core {
-            if ($Path -like 'C:*') { return @{DiskId='internal';VolumeId='c';BusType='NVMe';IsBoot=$true;IsSystem=$true;IsOffline=$false;IsReadOnly=$false;FileSystem='NTFS';FreeBytes=100GB;Drive='C:\'} }
-            return @{DiskId='usb-1';VolumeId='volume-1';BusType='USB';IsBoot=$false;IsSystem=$false;IsOffline=$false;IsReadOnly=$false;FileSystem='NTFS';FreeBytes=100GB;Drive='E:\'}
-        }
+    function New-Cenario {
+        # Caminhos com espaço e acento de propósito.
+        $raiz = Join-Path $TestDrive ([guid]::NewGuid().ToString('N').Substring(0, 8))
+        $origem = Join-Path $raiz 'Meus Documentos'
+        $destino = Join-Path $raiz 'HD Externo\BACKUP_WINDOWS\PC-Ação'
+        New-Item -ItemType Directory -Force (Join-Path $origem 'Sub pasta\node_modules\lib') | Out-Null
+        [IO.File]::WriteAllText((Join-Path $origem 'a.txt'), 'AAAA')
+        [IO.File]::WriteAllText((Join-Path $origem 'Sub pasta\b.txt'), 'BBBB')
+        [IO.File]::WriteAllText((Join-Path $origem 'Sub pasta\node_modules\lib\x.js'), 'lib')
+        [IO.File]::WriteAllText((Join-Path $origem '~$aberto.docx'), 'lock')
+        [IO.File]::WriteAllText((Join-Path $origem 'ação ü 日本.txt'), 'unicode')
+        [IO.File]::WriteAllBytes((Join-Path $origem 'vazio.bin'), (New-Object byte[] 0))
+        $grande = New-Object byte[] (9MB)
+        (New-Object Random 7).NextBytes($grande)
+        [IO.File]::WriteAllBytes((Join-Path $origem 'Sub pasta\grande.bin'), $grande)
+        $oculto = Join-Path $origem 'oculto.txt'
+        [IO.File]::WriteAllText($oculto, 'h')
+        (Get-Item -LiteralPath $oculto).Attributes = 'Hidden'
+        $texto = New-TextoConfig -Destino $destino -Origens @([pscustomobject]@{ Caminho = $origem; Nome = 'Documentos' })
+        $config = ConvertFrom-TextoConfig $texto -Arquivo 'teste'
+        Assert-Configuracao $config
+        [pscustomobject]@{ Raiz = $raiz; Origem = $origem; Destino = $destino; Config = $config; Copia = (Join-Path $destino 'Documentos') }
     }
-    It 'accepts a USB disk distinct from source' {
-        (Assert-ExternalDestination 'E:\Backup' @('C:\Data')).DiskId | Should -Be 'usb-1'
+    function Invoke-Teste($Cenario, [string]$Modo = 'Backup') {
+        Invoke-BackupWBA -Config $Cenario.Config -Destino $Cenario.Destino -Modo $Modo -Threads 4 -PastaSimulacao (Join-Path $Cenario.Raiz 'sim')
     }
-    It 'blocks the system/internal disk' {
-        { Assert-ExternalDestination 'C:\Backup' } | Should -Throw '*bloqueado*'
-    }
-    It 'blocks another partition of the source disk' {
-        { Assert-ExternalDestination 'E:\Backup' @('F:\Data') } | Should -Throw '*mesmo disco*'
-    }
-    It 'blocks a changed volume on the same drive letter' {
-        { Assert-ExternalDestination 'E:\Backup' @() @{DiskId='usb-1';VolumeId='other'} } | Should -Throw '*trocado*'
-    }
-    It 'blocks a readonly external disk' {
-        Mock Get-StorageIdentity -ModuleName Backup.Core { @{DiskId='usb';VolumeId='v';BusType='USB';IsBoot=$false;IsSystem=$false;IsOffline=$false;IsReadOnly=$true} }
-        { Assert-ExternalDestination 'E:\Backup' } | Should -Throw '*bloqueado*'
-    }
-    It 'blocks an unidentified disk' {
-        Mock Get-StorageIdentity -ModuleName Backup.Core { @{DiskId='';VolumeId='v'} }
-        { Assert-ExternalDestination 'E:\Backup' } | Should -Throw '*Identidade*'
-    }
-    It 'blocks unsupported filesystems without formatting' {
-        Mock Get-StorageIdentity -ModuleName Backup.Core { @{DiskId='usb';VolumeId='v';BusType='USB';IsBoot=$false;IsSystem=$false;IsOffline=$false;IsReadOnly=$false;FileSystem='exFAT'} }
-        { Assert-ExternalDestination 'E:\Backup' } | Should -Throw '*NTFS*'
-    }
-    It 'blocks ambiguity/read failures instead of falling back' {
-        Mock Get-StorageIdentity -ModuleName Backup.Core { throw 'Cannot resolve disk' }
-        { Assert-ExternalDestination 'E:\Backup' } | Should -Throw
-    }
-}
-Describe 'Path protections' {
-    It 'uses directory boundaries' {
-        Test-PathWithin 'C:\data2\x' 'C:\data' | Should -BeFalse
-        Test-PathWithin 'C:\data\x' 'C:\data' | Should -BeTrue
-    }
-    It 'rejects relative, UNC and alternate-stream paths' {
-        { Assert-PlainPath '.\backup' } | Should -Throw
-        { Assert-PlainPath '\\server\backup' } | Should -Throw
-        { Assert-PlainPath 'C:\file:stream' } | Should -Throw
-    }
-    It 'rejects a junction in a destination ancestor' {
-        $real = New-Item -ItemType Directory (Join-Path $TestDrive 'real')
-        $link = Join-Path $TestDrive 'redirect'
-        New-Item -ItemType Junction -Path $link -Target $real.FullName | Out-Null
-        { Assert-PlainPath "$link\new\file.txt" } | Should -Throw '*redirecionado*'
-    }
-}
-Describe 'File integration (temporary disk; physical guard mocked only here)' {
-    BeforeEach {
-        Mock Assert-ExternalDestination -ModuleName Backup.Core {
-            @{DiskId='test';VolumeId='test';FreeBytes=100GB;Drive='Z:\'}
-        }
-        $source = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
-        $dest = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
-        New-Item -ItemType Directory $source,$dest | Out-Null
-    }
-    It 'does not write before destination rejection' {
-        Mock Assert-ExternalDestination -ModuleName Backup.Core { throw 'blocked' }
-        $missing = Join-Path $TestDrive 'must-not-exist'
-        { Invoke-BackupPlan @(@{Id='docs';Path=$source}) $missing Backup } | Should -Throw
-        Test-Path $missing | Should -BeFalse
-    }
-    It 'rejects destination in source, empty plans and reserved identifiers' {
-        { Invoke-BackupPlan @(@{Id='docs';Path=$source}) "$source\backup" } | Should -Throw
-        { Invoke-BackupPlan @() $dest } | Should -Throw
-        { Invoke-BackupPlan @(@{Id='_RELATORIOS';Path=$source}) $dest } | Should -Throw
-        { Invoke-BackupPlan @(@{Id='CON';Path=$source}) $dest } | Should -Throw
-    }
-    It 'rejects duplicate identifiers' {
-        { Invoke-BackupPlan @(@{Id='docs';Path=$source},@{Id='DOCS';Path=$source}) $dest } | Should -Throw
-    }
-    It 'audits by hash without copying and writes a review' {
-        [IO.File]::WriteAllText("$source\a.txt", 'AAAA')
-        $run = Invoke-BackupPlan @(@{Id='docs';Path=$source}) $dest Audit
-        Test-Path "$dest\docs\a.txt" | Should -BeFalse
-        $row = Import-Csv "$run\inventario.csv"
-        $row.Status | Should -Be NEEDS_COPY
-        $row.SHA256 | Should -Be (Get-BackupHash "$source\a.txt")
-        Test-Path "$run\LEIA-ME.html" | Should -BeTrue
-    }
-    It 'reuses manually copied content under a different name and copies only missing data' {
-        [IO.File]::WriteAllText("$source\a.txt", 'AAAA')
-        [IO.File]::WriteAllText("$source\b.txt", 'BBBB')
-        [IO.File]::WriteAllText("$dest\manual.txt", 'AAAA')
-        $before = Get-BackupHash "$source\a.txt"
-        $run = Invoke-BackupPlan @(@{Id='docs';Path=$source}) $dest Backup
-        $rows = @(Import-Csv "$run\inventario.csv")
-        ($rows | Where-Object Status -eq REUSED_EXISTING).Destination | Should -Be "$dest\manual.txt"
-        Test-Path "$dest\docs\a.txt" | Should -BeFalse
-        [IO.File]::ReadAllText("$dest\docs\b.txt") | Should -Be BBBB
-        Get-BackupHash "$source\a.txt" | Should -Be $before
-        @(Get-ChildItem $source -File).Count | Should -Be 2
-        $again = Invoke-BackupPlan @(@{Id='docs';Path=$source}) $dest Backup
-        @(Import-Csv "$again\inventario.csv" | Where-Object Status -eq VERIFIED).Count | Should -Be 0
-    }
-    It 'restores two logical paths from one reused object using the inventory' {
-        [IO.File]::WriteAllText("$source\a.txt", 'shared')
-        [IO.File]::WriteAllText("$source\b.txt", 'shared')
-        [IO.File]::WriteAllText("$dest\manual.txt", 'shared')
-        $run = Invoke-BackupPlan @(@{Id='docs';Path=$source}) $dest Backup
-        $rows = @(Import-Csv "$run\inventario.csv")
-        @($rows | Where-Object Status -eq REUSED_EXISTING).Count | Should -Be 2
-        Test-Path "$dest\docs" | Should -BeFalse
-        $restore = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
-        New-Item -ItemType Directory $restore | Out-Null
-        foreach ($row in $rows) {
-            $path = Join-Path $restore $row.RelativePath
-            Copy-Item -LiteralPath $row.Destination -Destination $path
-            Get-BackupHash $path | Should -Be $row.SHA256
-        }
-        @(Get-ChildItem $restore -File).Count | Should -Be 2
-    }
-    It 'detects corruption and preserves prior content on replacement' {
-        [IO.File]::WriteAllText("$source\a.txt", 'AAAA')
-        Copy-VerifiedFile "$source\a.txt" "$dest\a.txt" "$dest\copy.log" | Should -Be VERIFIED
-        Copy-VerifiedFile "$source\a.txt" "$dest\a.txt" "$dest\copy.log" | Should -Be SKIP_IDENTICAL
-        $time = (Get-Item "$source\a.txt").LastWriteTimeUtc
-        [IO.File]::WriteAllText("$source\a.txt", 'BBBB')
-        (Get-Item "$source\a.txt").LastWriteTimeUtc = $time
-        Copy-VerifiedFile "$source\a.txt" "$dest\a.txt" "$dest\copy.log" | Should -Be VERIFIED
-        [IO.File]::ReadAllText("$dest\a.txt") | Should -Be BBBB
-        $old = Get-ChildItem $dest -Force -Filter '.history-*'
-        [IO.File]::ReadAllText($old.FullName) | Should -Be AAAA
-    }
-    It 'does not copy or replace on insufficient space' {
-        Mock Assert-ExternalDestination -ModuleName Backup.Core { @{DiskId='test';VolumeId='test';FreeBytes=0;Drive='Z:\'} }
-        [IO.File]::WriteAllText("$source\a.txt", 'new')
-        [IO.File]::WriteAllText("$dest\a.txt", 'old')
-        { Copy-VerifiedFile "$source\a.txt" "$dest\a.txt" "$dest\copy.log" } | Should -Throw '*Espaço*'
-        [IO.File]::ReadAllText("$dest\a.txt") | Should -Be old
-    }
-    It 'preserves old destination when verification fails' {
-        [IO.File]::WriteAllText("$source\a.txt", 'new')
-        [IO.File]::WriteAllText("$dest\a.txt", 'old')
-        Mock Get-BackupHash -ModuleName Backup.Core { 'CORRUPT' } -ParameterFilter { $Path -like '*\.stage-*' }
-        { Copy-VerifiedFile "$source\a.txt" "$dest\a.txt" "$dest\copy.log" } | Should -Throw '*verificação*'
-        [IO.File]::ReadAllText("$dest\a.txt") | Should -Be old
-    }
-    It 'does not trust a stale candidate after it changes' {
-        [IO.File]::WriteAllText("$dest\manual.txt", 'AAAA')
-        $hash = Get-BackupHash "$dest\manual.txt"
-        $index = Get-ExistingBackupIndex $dest
-        [IO.File]::WriteAllText("$dest\manual.txt", 'BBBB')
-        Find-ExistingContent $hash 4 $index | Should -BeNullOrEmpty
-    }
-    It 'rejects concurrent runs' {
-        $lock = [IO.File]::Open("$dest\.backup.lock", 'OpenOrCreate','ReadWrite','None')
-        try { { Invoke-BackupPlan @(@{Id='docs';Path=$source}) $dest } | Should -Throw }
-        finally { $lock.Dispose() }
-    }
-}
-Describe 'Dependencies and readable reports' {
-    It 'requires Robocopy only for backup' {
-        Mock Get-Command -ModuleName Backup.Core {
-            if ($Name -eq 'robocopy.exe') { return $null }
-            return @{Name=$Name}
-        }
-        { Assert-BackupDependencies Backup } | Should -Throw '*Robocopy*'
-        { Assert-BackupDependencies Audit } | Should -Not -Throw
-    }
-    It 'escapes hostile paths and shows errors' {
-        $run = Join-Path $TestDrive 'report'
-        New-Item -ItemType Directory $run | Out-Null
-        Write-BackupReview $run @(@{Id='docs';Path='C:\docs<script>'}) Audit 1
-        Get-Content "$run\LEIA-ME.md" -Raw | Should -Match 'Erros registrados: \*\*1'
-        Get-Content "$run\LEIA-ME.html" -Raw | Should -Not -Match '<script>'
+    function Get-Soma($Resumo, [string]$Campo) { return [int](($Resumo.Origens | Measure-Object -Property $Campo -Sum).Sum) }
+    function Set-ConteudoMesmaData([string]$Caminho, [byte[]]$Bytes) {
+        $data = (Get-Item -LiteralPath $Caminho).LastWriteTimeUtc
+        [IO.File]::WriteAllBytes($Caminho, $Bytes)
+        (Get-Item -LiteralPath $Caminho).LastWriteTimeUtc = $data
     }
 }
 
-Describe 'Cloud source policy' {
-    It 'recognizes all documented Cloud Files tags and rejects other tags' {
-        foreach ($variant in 0..15) {
-            Test-CloudReparseTag ([uint32](2415919130 + $variant * 4096)) | Should -BeTrue
-        }
-        foreach ($tag in @(0, 2684354563, 2684354572, 2147483681, 2415919132)) {
-            Test-CloudReparseTag ([uint32]$tag) | Should -BeFalse
-        }
+Describe 'Backup de ponta a ponta' {
+    BeforeAll {
+        Mock Assert-DestinoSeguro -ModuleName Backup.Core { [pscustomobject]@{ DiscoId = 'usb-teste'; Modelo = 'HD de teste'; Rotulo = 'TESTE'; Letra = 'C' } }
     }
-    It 'reads native metadata without opening content' {
-        $path = Join-Path $TestDrive 'native.txt'
-        [IO.File]::WriteAllText($path, 'local')
-        Get-ReparseTag $path | Should -Be 0
-        $real = New-Item -ItemType Directory (Join-Path $TestDrive 'native-dir')
-        $link = Join-Path $TestDrive 'native-link'
-        New-Item -ItemType Junction -Path $link -Target $real.FullName | Out-Null
-        Get-ReparseTag $link | Should -Be ([uint32]2684354563)
-        { Assert-PlainPath "$link\child" -AllowCloudSource } | Should -Throw '*redirecionado*'
+
+    It 'simulação não grava nada no HD' {
+        $c = New-Cenario
+        $r = Invoke-Teste $c 'Simular'
+        $r.CodigoSaida | Should -Be 0
+        Test-Path -LiteralPath $c.Destino | Should -BeFalse
+        @(Get-Content -LiteralPath $r.Relatorio | Where-Object { $_ -like 'COPIAR*' }).Count | Should -Be 6
     }
-    It 'allows cloud markers only for sources including ancestors' {
-        Mock Test-Path -ModuleName Backup.Core { $true }
-        Mock Get-Item -ModuleName Backup.Core { @{Attributes=[IO.FileAttributes]::ReparsePoint} }
-        Mock Get-ReparseTag -ModuleName Backup.Core { [uint32]2415919130 }
-        { Assert-PlainPath 'C:\Cloud\docs' -AllowCloudSource } | Should -Not -Throw
-        { Assert-PlainPath 'C:\Cloud\docs' } | Should -Throw '*redirecionado*'
+
+    It 'primeiro backup copia, confere e exclui o que deve' {
+        $c = New-Cenario
+        $r = Invoke-Teste $c
+        $r.Situacao | Should -Be 'OK'
+        $r.CodigoSaida | Should -Be 0
+        Get-Soma $r 'Copiados' | Should -Be 6
+        [IO.File]::ReadAllText((Join-Path $c.Copia 'Sub pasta\b.txt')) | Should -Be 'BBBB'
+        Test-Path -LiteralPath (Join-Path $c.Copia 'ação ü 日本.txt') | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $c.Copia 'vazio.bin') | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $c.Copia 'oculto.txt') | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $c.Copia 'Sub pasta\node_modules') | Should -BeFalse
+        Test-Path -LiteralPath (Join-Path $c.Copia '~$aberto.docx') | Should -BeFalse
+        (Get-FileHash -LiteralPath (Join-Path $c.Copia 'Sub pasta\grande.bin')).Hash | Should -Be (Get-FileHash -LiteralPath (Join-Path $c.Origem 'Sub pasta\grande.bin')).Hash
+        Test-Path -LiteralPath $r.Relatorio | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $c.Destino '_CONTROLE\ULTIMO-RELATORIO.html') | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $c.Destino 'LEIA-ME.txt') | Should -BeTrue
+        $m = [WindowsBackupAudit.Nativo]::LerManifesto((Join-Path $c.Destino '_CONTROLE\manifestos\Documentos.tsv'))
+        $m.Problema | Should -BeNullOrEmpty
+        $m.Registros.Count | Should -Be 6
+        $m.Registros['Sub pasta\grande.bin'].Sha256 | Should -Be (Get-FileHash -LiteralPath (Join-Path $c.Origem 'Sub pasta\grande.bin')).Hash.ToLowerInvariant()
+        $detalhes = Import-Csv -LiteralPath (Join-Path (Split-Path $r.Relatorio) 'detalhes.tsv') -Delimiter "`t"
+        @($detalhes | Where-Object situacao -eq 'COPIADO').Count | Should -Be 6
+        # A origem nunca é alterada.
+        [IO.File]::ReadAllText((Join-Path $c.Origem 'a.txt')) | Should -Be 'AAAA'
     }
-    It 'fails closed when the reparse tag cannot be read' {
-        Mock Test-Path -ModuleName Backup.Core { $true }
-        Mock Get-Item -ModuleName Backup.Core { @{Attributes=[IO.FileAttributes]::ReparsePoint} }
-        Mock Get-ReparseTag -ModuleName Backup.Core { throw 'metadata unavailable' }
-        { Assert-PlainPath 'C:\Cloud' -AllowCloudSource } | Should -Throw '*metadata*'
+
+    It 'segunda execução não copia nem lê nada que não mudou' {
+        $c = New-Cenario
+        $null = Invoke-Teste $c
+        $r = Invoke-Teste $c
+        $r.Situacao | Should -Be 'OK'
+        Get-Soma $r 'Copiados' | Should -Be 0
+        Get-Soma $r 'Conferidos' | Should -Be 0
+        Get-Soma $r 'SemMudanca' | Should -Be 6
     }
-    It 'rejects offline or recall attributes before hashing content' {
-        Mock Assert-PlainPath -ModuleName Backup.Core {}
-        foreach ($attributes in @(4096,262144,4194304)) {
-            Mock Get-Item -ModuleName Backup.Core { @{Attributes=$attributes} }
-            { Get-BackupHash 'C:\never-read.txt' -Source } | Should -Throw '*Sempre manter*'
-        }
+
+    It 'arquivo alterado: guarda a versão anterior e copia a nova' {
+        $c = New-Cenario
+        $null = Invoke-Teste $c
+        [IO.File]::WriteAllText((Join-Path $c.Origem 'a.txt'), 'AAAA versão 2')
+        $r = Invoke-Teste $c
+        Get-Soma $r 'Atualizados' | Should -Be 1
+        [IO.File]::ReadAllText((Join-Path $c.Copia 'a.txt')) | Should -Be 'AAAA versão 2'
+        $antiga = @(Get-ChildItem -LiteralPath (Join-Path $c.Destino '_VERSOES_ANTERIORES') -Recurse -Filter 'a.txt')
+        $antiga.Count | Should -Be 1
+        [IO.File]::ReadAllText($antiga[0].FullName) | Should -Be 'AAAA'
     }
-    It 'records unavailable cloud content as an error without making a copy' {
-        Mock Assert-ExternalDestination -ModuleName Backup.Core { @{DiskId='test';VolumeId='test';FreeBytes=100GB;Drive='Z:\'} }
-        Mock Assert-SourceFileAvailable -ModuleName Backup.Core { throw 'Sempre manter neste dispositivo' }
-        $source = New-Item -ItemType Directory (Join-Path $TestDrive 'cloud-source')
-        $dest = New-Item -ItemType Directory (Join-Path $TestDrive 'cloud-dest')
-        [IO.File]::WriteAllText("$source\offline.txt", 'placeholder stand-in')
-        { Invoke-BackupPlan @(@{Id='docs';Path=$source.FullName}) $dest.FullName Backup } | Should -Throw '*erro*'
-        Test-Path "$dest\docs\offline.txt" | Should -BeFalse
-        $csv = Get-ChildItem "$dest\_RELATORIOS" -Recurse -Filter inventario.csv
-        (Import-Csv $csv.FullName).Status | Should -Be ERROR
+
+    It 'arquivo apagado na origem continua no backup' {
+        $c = New-Cenario
+        $null = Invoke-Teste $c
+        Remove-Item -LiteralPath (Join-Path $c.Origem 'a.txt')
+        $r = Invoke-Teste $c
+        $r.Situacao | Should -Be 'OK'
+        Test-Path -LiteralPath (Join-Path $c.Copia 'a.txt') | Should -BeTrue
     }
-    It 'preserves an existing personal configuration during setup' {
-        $config = Join-Path $TestDrive 'personal.json'
-        [IO.File]::WriteAllText($config, 'personal settings')
-        { New-BackupConfiguration $config } | Should -Throw '*preservada*'
-        [IO.File]::ReadAllText($config) | Should -Be 'personal settings'
+
+    It 'pasta renomeada: move no HD em vez de copiar de novo' {
+        $c = New-Cenario
+        $null = Invoke-Teste $c
+        Rename-Item -LiteralPath (Join-Path $c.Origem 'Sub pasta') -NewName 'Pasta nova'
+        $r = Invoke-Teste $c
+        $r.Situacao | Should -Be 'OK'
+        Get-Soma $r 'Movidos' | Should -Be 1      # grande.bin (os pequenos são copiados de novo)
+        Test-Path -LiteralPath (Join-Path $c.Copia 'Pasta nova\grande.bin') | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $c.Copia 'Sub pasta\grande.bin') | Should -BeFalse
+        Test-Path -LiteralPath (Join-Path $c.Copia 'Sub pasta\b.txt') | Should -BeTrue
     }
-    It 'reports an invalid source before blaming external drives' {
-        Mock Assert-PlainPath -ModuleName Backup.Core { throw 'source junction' }
-        { Select-BackupDestination @('C:\bad-source') } | Should -Throw '*origem*source junction*'
+
+    It 'confere por SHA-256 o que já está no HD sem manifesto e corrige cópia corrompida' {
+        $c = New-Cenario
+        $null = Invoke-Teste $c
+        Remove-Item -LiteralPath (Join-Path $c.Destino '_CONTROLE\manifestos\Documentos.tsv')
+        Set-ConteudoMesmaData (Join-Path $c.Copia 'a.txt') ([Text.Encoding]::ASCII.GetBytes('AAAX'))
+        $r = Invoke-Teste $c
+        $r.Situacao | Should -Be 'OK'
+        Get-Soma $r 'Conferidos' | Should -Be 5
+        Get-Soma $r 'Atualizados' | Should -Be 1
+        Get-Soma $r 'Copiados' | Should -Be 0
+        [IO.File]::ReadAllText((Join-Path $c.Copia 'a.txt')) | Should -Be 'AAAA'
+    }
+
+    It 'ignora manifesto adulterado e confere tudo de novo' {
+        $c = New-Cenario
+        $null = Invoke-Teste $c
+        $caminho = Join-Path $c.Destino '_CONTROLE\manifestos\Documentos.tsv'
+        $linhas = [IO.File]::ReadAllLines($caminho)
+        $linhas[3] = $linhas[3] -replace '[0-9a-f]{64}', ('0' * 64)
+        [IO.File]::WriteAllLines($caminho, $linhas)
+        $r = Invoke-Teste $c
+        $r.Situacao | Should -Be 'OK'
+        Get-Soma $r 'Conferidos' | Should -Be 6
+    }
+
+    It 'verificação de integridade encontra cópia alterada e o backup seguinte corrige' {
+        $c = New-Cenario
+        $null = Invoke-Teste $c
+        Set-ConteudoMesmaData (Join-Path $c.Copia 'Sub pasta\b.txt') ([Text.Encoding]::ASCII.GetBytes('XXXX'))
+        $v = Invoke-VerificacaoWBA -Destino $c.Destino
+        $v.Situacao | Should -Be 'ERROS'
+        $v.Erros | Should -Be 1
+        $r = Invoke-Teste $c
+        Get-Soma $r 'Atualizados' | Should -Be 1
+        (Invoke-VerificacaoWBA -Destino $c.Destino).Situacao | Should -Be 'OK'
+        (Invoke-VerificacaoWBA -Destino $c.Destino -Amostra 50).CodigoSaida | Should -Be 0
+    }
+
+    It 'cópia interrompida (arquivo parcial no HD) é guardada e refeita' {
+        $c = New-Cenario
+        $null = Invoke-Teste $c
+        [IO.File]::WriteAllText((Join-Path $c.Origem 'novo.txt'), 'conteúdo completo')
+        [IO.File]::WriteAllText((Join-Path $c.Copia 'novo.txt'), 'cont')
+        $r = Invoke-Teste $c
+        $r.Situacao | Should -Be 'OK'
+        [IO.File]::ReadAllText((Join-Path $c.Copia 'novo.txt')) | Should -Be 'conteúdo completo'
+    }
+
+    It 'não segue junctions nem links simbólicos' {
+        $c = New-Cenario
+        $fora = Join-Path $c.Raiz 'fora'
+        New-Item -ItemType Directory -Force $fora | Out-Null
+        [IO.File]::WriteAllText((Join-Path $fora 'segredo.txt'), 'fora')
+        New-Item -ItemType Junction -Path (Join-Path $c.Origem 'atalho') -Target $fora | Out-Null
+        $r = Invoke-Teste $c
+        $r.Situacao | Should -Be 'OK'
+        Get-Soma $r 'Links' | Should -Be 1
+        Test-Path -LiteralPath (Join-Path $c.Copia 'atalho') | Should -BeFalse
+    }
+
+    It 'arquivo só na nuvem (atributo Offline) não é baixado: aviso, código 1' {
+        $c = New-Cenario
+        $p = Join-Path $c.Origem 'na nuvem.docx'
+        [IO.File]::WriteAllText($p, 'placeholder')
+        (Get-Item -LiteralPath $p).Attributes = [IO.FileAttributes]::Offline
+        $r = Invoke-Teste $c
+        $r.Situacao | Should -Be 'AVISOS'
+        $r.CodigoSaida | Should -Be 1
+        $r.SoNaNuvem | Should -Be 1
+        Test-Path -LiteralPath (Join-Path $c.Copia 'na nuvem.docx') | Should -BeFalse
+        (Get-Item -LiteralPath $p).Attributes = [IO.FileAttributes]::Normal
+    }
+
+    It 'arquivo em uso vira erro (código 2) sem afetar os outros; depois é copiado' {
+        $c = New-Cenario
+        $p = Join-Path $c.Origem 'em uso.pst'
+        [IO.File]::WriteAllText($p, 'dados')
+        $trava = [IO.File]::Open($p, 'Open', 'ReadWrite', 'None')
+        try {
+            $r = Invoke-Teste $c
+            $r.Situacao | Should -Be 'ERROS'
+            $r.CodigoSaida | Should -Be 2
+            Get-Soma $r 'Copiados' | Should -Be 6
+        } finally { $trava.Dispose() }
+        $r = Invoke-Teste $c
+        $r.Situacao | Should -Be 'OK'
+        Get-Soma $r 'Copiados' | Should -Be 1
+    }
+
+    It 'caminhos com mais de 260 caracteres' {
+        $c = New-Cenario
+        $curto = Join-Path $c.Origem 'p1\p2'
+        New-Item -ItemType Directory -Force $curto | Out-Null
+        [IO.File]::WriteAllText((Join-Path $curto 'longo.txt'), 'caminho longo')
+        Rename-Item -LiteralPath $curto -NewName ('B' * 120)
+        Rename-Item -LiteralPath (Join-Path $c.Origem 'p1') -NewName ('A' * 120)
+        $relativo = ('A' * 120) + '\' + ('B' * 120) + '\longo.txt'
+        (Join-Path $c.Copia $relativo).Length | Should -BeGreaterThan 260
+        $r = Invoke-Teste $c
+        $r.Situacao | Should -Be 'OK'
+        Get-Soma $r 'Copiados' | Should -Be 7
+        [WindowsBackupAudit.Nativo]::Info((Join-Path $c.Copia $relativo)) | Should -Not -BeNullOrEmpty
+        (Invoke-VerificacaoWBA -Destino $c.Destino).Situacao | Should -Be 'OK'
+    }
+
+    It 'pasta da versão 1 (AUTO_...) é renomeada e conferida, sem recópia' {
+        $c = New-Cenario
+        $antiga = Join-Path $c.Destino (Get-IdVersaoAnterior $c.Origem)
+        New-Item -ItemType Directory -Force $antiga, (Join-Path $c.Destino '_RELATORIOS') | Out-Null
+        Copy-Item -LiteralPath (Join-Path $c.Origem 'a.txt') -Destination (Join-Path $antiga 'a.txt')
+        (Get-Item -LiteralPath (Join-Path $antiga 'a.txt')).LastWriteTimeUtc = (Get-Item -LiteralPath (Join-Path $c.Origem 'a.txt')).LastWriteTimeUtc
+        $r = Invoke-Teste $c
+        $r.Situacao | Should -Be 'OK'
+        Test-Path -LiteralPath $antiga | Should -BeFalse
+        Get-Soma $r 'Conferidos' | Should -Be 1
+        Get-Soma $r 'Copiados' | Should -Be 5
+    }
+
+    It 'sem espaço no HD: não copia nada e informa' {
+        $c = New-Cenario
+        Mock Get-LivreDestino -ModuleName Backup.Core { 0 }
+        $r = Invoke-Teste $c
+        $r.Situacao | Should -Be 'INTERROMPIDO'
+        $r.Falha | Should -Match 'Espaço insuficiente'
+        Test-Path -LiteralPath (Join-Path $c.Copia 'a.txt') | Should -BeFalse
+    }
+
+    It 'impede duas execuções no mesmo HD ao mesmo tempo' {
+        $c = New-Cenario
+        New-Item -ItemType Directory -Force $c.Destino | Out-Null
+        $trava = [IO.File]::Open((Join-Path $c.Destino '.backup.lock'), 'OpenOrCreate', 'ReadWrite', 'None')
+        try { { Invoke-Teste $c } | Should -Throw '*Outro backup*' }
+        finally { $trava.Dispose() }
+    }
+}
+
+Describe 'Motor nativo' {
+    It 'aplica padrões de exclusão como o Robocopy' {
+        $f = [WindowsBackupAudit.Filtro]::new([string[]]@('node_modules', 'cache*', 'C:\Dados\Grande'), [string[]]@('*.tmp', '~$*'))
+        $f.ExcluiPasta('node_modules', 'C:\x\node_modules') | Should -BeTrue
+        $f.ExcluiPasta('Cache2', 'C:\x\Cache2') | Should -BeTrue
+        $f.ExcluiPasta('Grande', 'C:\Dados\Grande') | Should -BeTrue
+        $f.ExcluiPasta('Grande', 'C:\Outro\Grande') | Should -BeFalse
+        $f.ExcluiArquivo('a.TMP', 'C:\a.TMP') | Should -BeTrue
+        $f.ExcluiArquivo('~$doc.docx', 'C:\~$doc.docx') | Should -BeTrue
+        $f.ExcluiArquivo('doc.docx', 'C:\doc.docx') | Should -BeFalse
+    }
+    It 'reconhece tags de nuvem e de link' {
+        foreach ($v in 0..15) { [WindowsBackupAudit.Nativo]::EhNuvem([uint32](0x9000001A + $v * 0x1000)) | Should -BeTrue }
+        [WindowsBackupAudit.Nativo]::EhLink([uint32]0xA0000003) | Should -BeTrue    # junction
+        [WindowsBackupAudit.Nativo]::EhLink([uint32]0xA000000C) | Should -BeTrue    # symlink
+        [WindowsBackupAudit.Nativo]::EhLink([uint32]0x80000017) | Should -BeFalse   # WOF (arquivo comprimido)
+        [WindowsBackupAudit.Nativo]::EhLink([uint32]0x9000001A) | Should -BeFalse   # OneDrive
+    }
+    It 'calcula SHA-256 igual ao Get-FileHash' {
+        $p = Join-Path $TestDrive 'hash.bin'
+        $b = New-Object byte[] (3MB + 17)
+        (New-Object Random 3).NextBytes($b)
+        [IO.File]::WriteAllBytes($p, $b)
+        [WindowsBackupAudit.Nativo]::Sha256($p) | Should -Be (Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash.ToLowerInvariant()
     }
 }

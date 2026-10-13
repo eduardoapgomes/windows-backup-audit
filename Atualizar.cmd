@@ -16,7 +16,7 @@ if errorlevel 1 (
 )
 echo.
 echo WINDOWS BACKUP - atualizar o programa
-echo Feche a auditoria e o backup antes de atualizar.
+echo Feche o backup antes de atualizar.
 echo Esta operacao NAO altera arquivos no HD externo.
 echo.
 where git >nul 2>&1
@@ -45,10 +45,11 @@ if errorlevel 1 (
 )
 if not exist "%PROJECT_DIR%Backup.ps1" goto incompleto
 if not exist "%PROJECT_DIR%src\Backup.Core.psm1" goto incompleto
+if not exist "%PROJECT_DIR%src\Nativo.cs" goto incompleto
 echo.
 echo ATUALIZADO: os arquivos principais estao presentes.
-echo A configuracao backup.local.json e os backups no USB nao foram alterados.
-echo Abra Iniciar.cmd para executar a auditoria.
+echo Sua configuracao (configuracao.txt) e os backups no HD nao foram alterados.
+echo Abra Iniciar.cmd. Veja CHANGELOG.md para saber o que mudou.
 exit /b 0
 
 :outra_branch
@@ -72,7 +73,7 @@ echo Baixe o ZIP da branch main e EXTRAIA EM OUTRA PASTA:
 echo https://github.com/eduardoapgomes/windows-backup-audit/archive/refs/heads/main.zip
 echo.
 echo Nao misture arquivos de versoes diferentes.
-echo Se usar configuracao manual, copie apenas backup.local.json para a pasta nova.
+echo Copie para a pasta nova apenas configuracao.txt (ou backup.local.json, da versao 1).
 echo Nao mova nem apague backups ou relatorios do HD externo.
 exit /b 2
 

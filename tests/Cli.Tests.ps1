@@ -1,67 +1,35 @@
-﻿BeforeAll {
-    $entryPoint = Join-Path $PSScriptRoot '..\Backup.ps1'
+﻿# Backup.ps1 executado como o menu executa: um processo novo do PowerShell.
+BeforeAll {
+    $script:Entrada = Join-Path $PSScriptRoot '..\Backup.ps1'
+    $script:Exe = (Get-Process -Id $PID).Path
+    function Invoke-Cli([string[]]$Argumentos) {
+        $saida = & $script:Exe -NoProfile -ExecutionPolicy Bypass -File $script:Entrada @Argumentos 2>&1 | Out-String
+        [pscustomobject]@{ Codigo = $LASTEXITCODE; Saida = $saida }
+    }
 }
-Describe 'CLI configuration in a fresh Windows PowerShell process' {
-    BeforeEach {
-        $fixture = Join-Path $TestDrive ('project with spaces ' + [guid]::NewGuid().ToString('N'))
-        New-Item -ItemType Directory (Join-Path $fixture 'src') -Force | Out-Null
-        Copy-Item -LiteralPath $entryPoint -Destination (Join-Path $fixture 'Backup.ps1')
-        # Isolate config binding and CLI invocation; no physical disk or backup is touched.
-        @'
-function Assert-BackupDependencies { param($Mode) }
-function New-BackupConfiguration { param($Path) Write-Output ('SETUP:' + $Path) }
-function Get-AutomaticBackupPlan { [pscustomobject]@{Destination='';Sources=@(@{Id='AUTO';Path='C:\Personal'});Discovery=@();ExcludedPaths=@()} }
-function Select-BackupDestination { param($Sources) 'E:\Chosen' }
-function Invoke-BackupPlan {
-    param($Sources, $Destination, $Mode, $Discovery, $ExcludedPaths, $Scope, [switch]$OpenReport, $DependencyPolicy, [switch]$QuickAudit)
-    Write-Output ("PLAN:" + $Sources[0].Id + ":" + $Mode + ":" + $Destination + ":QUICK=" + [bool]$QuickAudit + ":POLICY=" + $DependencyPolicy)
-}
-Export-ModuleMember -Function *
-'@ | Set-Content -LiteralPath (Join-Path $fixture 'src\Backup.Core.psm1') -Encoding UTF8
-        '{"Destination":"","Sources":[{"Id":"DEFAULT","Path":"C:\\Data"}]}' |
-            Set-Content -LiteralPath (Join-Path $fixture 'backup.local.json') -Encoding UTF8
+
+Describe 'Backup.ps1 na linha de comando' {
+    It 'sem configuração: não executa (código 3) e indica Configurar' {
+        $r = Invoke-Cli @('-Acao', 'Backup', '-Config', (Join-Path $TestDrive 'nao-existe.txt'), '-SemAbrirRelatorio')
+        $r.Codigo | Should -Be 3
+        $r.Saida | Should -Match 'Configurar'
     }
-    It 'discovers automatically without a config and ignores a manual project-only config' {
-        $output = & powershell.exe -NoProfile -STA -File "$fixture\Backup.ps1" -AutoDiscover -Mode Audit
-        $LASTEXITCODE | Should -Be 0
-        ($output -join '') | Should -Be 'PLAN:AUTO:Audit:E:\Chosen:QUICK=True:POLICY=Exclude'
-        Remove-Item -LiteralPath "$fixture\backup.local.json"
-        $output = & powershell.exe -NoProfile -STA -File "$fixture\Backup.ps1" -AutoDiscover -Mode Audit
-        $LASTEXITCODE | Should -Be 0
-        ($output -join '') | Should -Be 'PLAN:AUTO:Audit:E:\Chosen:QUICK=True:POLICY=Exclude'
+    It 'configuração com erro: mostra a linha do problema' {
+        $cfg = Join-Path $TestDrive 'ruim.txt'
+        [IO.File]::WriteAllText($cfg, "[DESTINO]`r`nE:\BACKUP`r`n[ORIGENS]`r`npasta\relativa`r`n", (New-Object Text.UTF8Encoding($true)))
+        $r = Invoke-Cli @('-Acao', 'Simular', '-Config', $cfg)
+        $r.Codigo | Should -Be 3
+        $r.Saida | Should -Match 'Linha 4'
     }
-    It 'allows explicit full hashing when the user asks for it' {
-        $output = & powershell.exe -NoProfile -STA -File "$fixture\Backup.ps1" -AutoDiscover -Mode Audit -FullAudit
-        $LASTEXITCODE | Should -Be 0
-        ($output -join '') | Should -Be 'PLAN:AUTO:Audit:E:\Chosen:QUICK=False:POLICY=Exclude'
-    }
-    It 'routes setup to the script-local configuration without starting a backup' {
-        $output = & powershell.exe -NoProfile -STA -File "$fixture\Backup.ps1" -Setup
-        $LASTEXITCODE | Should -Be 0
-        ($output -join '') | Should -Be "SETUP:$fixture\backup.local.json"
-    }
-    It 'loads the default config beside the script with -File and -SelectDestination' {
-        $output = & powershell.exe -NoProfile -STA -File "$fixture\Backup.ps1" -Mode Audit -SelectDestination
-        $LASTEXITCODE | Should -Be 0
-        ($output -join '') | Should -Be 'PLAN:DEFAULT:Audit:E:\Chosen:QUICK=False:POLICY=Auto'
-    }
-    It 'honors a relative explicit config without depending on the caller directory' {
-        '{"Destination":"E:\\Custom","Sources":[{"Id":"CUSTOM","Path":"C:\\Data"}]}' |
-            Set-Content -LiteralPath "$fixture\custom.json" -Encoding UTF8
-        $output = & powershell.exe -NoProfile -STA -File "$fixture\Backup.ps1" -Mode Audit -Config custom.json
-        $LASTEXITCODE | Should -Be 0
-        ($output -join '') | Should -Be 'PLAN:CUSTOM:Audit:E:\Custom:QUICK=False:POLICY=Auto'
-    }
-    It 'exits with code 2 and an actionable path when config is missing' {
-        Remove-Item -LiteralPath "$fixture\backup.local.json"
-        $previous = $ErrorActionPreference
-        try {
-            $ErrorActionPreference = 'Continue'
-            $output = & powershell.exe -NoProfile -STA -File "$fixture\Backup.ps1" -Mode Audit 2>&1
-            $code = $LASTEXITCODE
-        } finally { $ErrorActionPreference = $previous }
-        $code | Should -Be 2
-        ($output -join '') | Should -Match 'backup.local.json'
-        ($output -join '') | Should -Match 'Iniciar.cmd'
-    }
+    It 'recusa um destino que não é HD externo USB e não cria nada' {
+        $origem = Join-Path $TestDrive 'origem'
+        New-Item -ItemType Directory -Force $origem | Out-Null
+        $destino = Join-Path $TestDrive 'nao-e-usb\BACKUP'
+        $cfg = Join-Path $TestDrive 'cfg.txt'
+        [IO.File]::WriteAllText($cfg, "[DESTINO]`r`n$destino`r`n[ORIGENS]`r`n$origem`r`n", (New-Object Text.UTF8Encoding($true)))
+        $r = Invoke-Cli @('-Acao', 'Simular', '-Config', $cfg)
+        $r.Codigo | Should -Be 3
+        $r.Saida | Should -Match '(USB|identidade|mesmo disco)'
+        Test-Path -LiteralPath $destino | Should -BeFalse
+    } -Skip:(-not (Get-Command Get-Disk -ErrorAction SilentlyContinue))
 }

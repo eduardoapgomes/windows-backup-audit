@@ -1,0 +1,7 @@
+# Arquivos .cmd precisam de CRLF no Windows; scripts também ficam em CRLF no checkout.
+*.cmd  text eol=crlf
+*.ps1  text eol=crlf
+*.psm1 text eol=crlf
+*.cs   text eol=crlf
+*.txt  text eol=crlf
+*.md   text

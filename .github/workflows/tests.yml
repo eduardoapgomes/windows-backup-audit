@@ -1,7 +1,6 @@
 name: Windows tests
 on:
   push:
-    branches: [main]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -11,16 +10,41 @@ concurrency:
   cancel-in-progress: true
 jobs:
   test:
+    name: Pester (${{ matrix.nome }})
     runs-on: windows-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - nome: Windows PowerShell 5.1
+            shell: powershell
+          - nome: PowerShell 7
+            shell: pwsh
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
     steps:
       - uses: actions/checkout@v6
-      - name: PowerShell 5.1 integration tests
-        shell: powershell
+      - name: Instalar Pester 5.7.1
         run: |
           Install-Module Pester -RequiredVersion 5.7.1 -Force -Scope CurrentUser -SkipPublisherCheck
+      - name: Testes (Robocopy e NTFS reais; HD USB simulado)
+        run: |
           Import-Module Pester -RequiredVersion 5.7.1
-          Invoke-Pester -Path ./tests -CI
-
-      - name: Read-only hierarchy analysis tests
-        shell: powershell
-        run: python -m unittest discover -s tests -p "test_*.py" -v
+          $config = New-PesterConfiguration
+          $config.Run.Path = './tests'
+          $config.Run.PassThru = $true
+          $config.Output.Verbosity = 'Detailed'
+          $r = Invoke-Pester -Configuration $config
+          function Escape([string]$t) { $t.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A') }
+          function EscapeProp([string]$t) { (Escape $t).Replace(':', '%3A').Replace(',', '%2C') }
+          foreach ($t in @($r.Failed)) {
+            $msg = ($t.ErrorRecord | ForEach-Object { $_.Exception.Message + ' @ ' + $_.ScriptStackTrace }) -join ' | '
+            Write-Host ("::error title={0}::{1}" -f (EscapeProp $t.ExpandedPath), (Escape $msg))
+          }
+          foreach ($b in @($r.FailedBlocks) + @($r.FailedContainers)) {
+            $msg = ($b.ErrorRecord | ForEach-Object { $_.Exception.Message + ' @ ' + $_.ScriptStackTrace }) -join ' | '
+            Write-Host ("::error title={0}::{1}" -f (EscapeProp ([string]$b.Name + [string]$b.Item)), (Escape $msg))
+          }
+          if ($r.Result -ne 'Passed') { exit 1 }

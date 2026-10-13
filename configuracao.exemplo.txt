@@ -1,0 +1,43 @@
+﻿# =====================================================================
+#  WINDOWS BACKUP AUDIT - configuração
+#  Linhas que começam com # são comentários. Salve e feche ao terminar.
+#  Guia: docs\GUIA-RAPIDO.md
+# =====================================================================
+
+[DESTINO]
+# Pasta no HD externo (USB, NTFS). Se a letra do HD mudar, o programa
+# procura esta mesma pasta nos outros HDs USB conectados.
+E:\BACKUP_WINDOWS\MEU-PC-SEU_USUARIO
+
+[ORIGENS]
+# Uma pasta por linha. Cada uma vira uma pasta no backup com o mesmo nome.
+# Para escolher outro nome:   D:\Fotos > Fotos-D
+# Para deixar de copiar uma pasta, apague a linha ou coloque # no início.
+C:\Users\SEU_USUARIO\Documents
+C:\Users\SEU_USUARIO\Desktop
+C:\Users\SEU_USUARIO\Pictures
+C:\Users\SEU_USUARIO\Downloads
+D:\Projetos > D_Projetos
+
+[EXCLUIR_PASTAS]
+# Nome de pasta (ignorada em qualquer nível) ou caminho completo. Aceita * e ?.
+# Bibliotecas e caches que podem ser reinstalados. .git NÃO é excluído de propósito.
+node_modules
+__pycache__
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.tox
+.venv
+AppData
+$RECYCLE.BIN
+System Volume Information
+
+[EXCLUIR_ARQUIVOS]
+# Nome ou padrão de arquivo. Aceita * e ?.
+~$*
+*.tmp
+Thumbs.db
+*.crdownload
+*.part
+*.partial

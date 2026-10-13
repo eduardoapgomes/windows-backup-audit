@@ -1,7 +1,9 @@
+# Configuração pessoal e relatórios locais: nunca enviar ao GitHub
+configuracao.txt
 backup.local.json
+relatorios/
 *.log
-*.csv
+*.tsv
 *.pfx
 *.key
 *.zip
-__pycache__/
