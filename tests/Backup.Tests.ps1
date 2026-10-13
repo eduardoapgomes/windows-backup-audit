@@ -255,6 +255,17 @@ Describe 'Backup de ponta a ponta' {
     }
 }
 
+Describe 'Progresso da cópia' {
+    It 'aceita volumes acima de 2 GB (bug: estouro de Int32)' {
+        $p = Get-ProgressoCopia -LivreAntes 400GB -LivreAgora (400GB - 2202750976) -BytesPrevistos 24727925610 -Segundos 32
+        $p.Feito | Should -Be 2202750976
+        $p.Percentual | Should -Be 8
+        $p.Status | Should -Match '/s'
+        (Get-ProgressoCopia -LivreAntes 10GB -LivreAgora 11GB -BytesPrevistos 0 -Segundos 0).Percentual | Should -Be -1
+        (Get-ProgressoCopia -LivreAntes 900GB -LivreAgora 100GB -BytesPrevistos 5GB -Segundos 10).Percentual | Should -Be 99
+    }
+}
+
 Describe 'Motor nativo' {
     It 'aplica padrões de exclusão como o Robocopy' {
         $f = [WindowsBackupAudit.Filtro]::new([string[]]@('node_modules', 'cache*', 'C:\Dados\Grande'), [string[]]@('*.tmp', '~$*'))

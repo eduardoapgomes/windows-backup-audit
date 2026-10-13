@@ -131,6 +131,21 @@ function Move-PastasVersaoAnterior {
 }
 
 # ------------------------------------------------------------------ Robocopy
+function Get-ProgressoCopia {
+    # Quanto já foi gravado no HD (pela queda do espaço livre). Tudo em [long]/[double]:
+    # backups passam facilmente de 2 GB, o limite de um inteiro de 32 bits.
+    param([long]$LivreAntes, [long]$LivreAgora, [long]$BytesPrevistos, [double]$Segundos)
+    [long]$feito = $LivreAntes - $LivreAgora
+    if ($feito -lt 0) { $feito = 0 }
+    [double]$tempo = if ($Segundos -lt 1) { 1.0 } else { $Segundos }
+    [int]$pct = -1
+    if ($BytesPrevistos -gt 0) { $pct = [int][math]::Floor([math]::Min([double]99, 100.0 * $feito / $BytesPrevistos)) }
+    [pscustomobject]@{
+        Feito = $feito; Percentual = $pct
+        Status = '{0} de {1} - {2}/s' -f (Format-Tamanho $feito), (Format-Tamanho $BytesPrevistos), (Format-Tamanho ($feito / $tempo))
+    }
+}
+
 function Invoke-Robocopy {
     # Copia somente arquivos que NÃO existem no destino. /XC /XN /XO impedem sobrescrever.
     # /XA:O ignora arquivos só na nuvem (não baixa o OneDrive inteiro).
@@ -165,11 +180,9 @@ function Invoke-Robocopy {
     $processo = [Diagnostics.Process]::Start($info)
     try {
         while (-not $processo.WaitForExit(1000)) {
-            $feito = [math]::Max(0, $livreAntes - (Get-LivreDestino $Destino))
-            $segundos = [math]::Max(1, ((Get-Date) - $inicio).TotalSeconds)
-            $status = '{0} de {1} - {2}/s' -f (Format-Tamanho $feito), (Format-Tamanho $BytesPrevistos), (Format-Tamanho ($feito / $segundos))
-            $pct = if ($BytesPrevistos -gt 0) { [int][math]::Min(99, 100.0 * $feito / $BytesPrevistos) } else { -1 }
-            Write-Progress -Id 1 -Activity $atividade -Status $status -PercentComplete $pct
+            $p = Get-ProgressoCopia -LivreAntes $livreAntes -LivreAgora (Get-LivreDestino $Destino) `
+                -BytesPrevistos $BytesPrevistos -Segundos ((Get-Date) - $inicio).TotalSeconds
+            Write-Progress -Id 1 -Activity $atividade -Status $p.Status -PercentComplete $p.Percentual
         }
         $processo.WaitForExit()
         return $processo.ExitCode
@@ -255,7 +268,7 @@ function Invoke-VerificacaoArquivos {
                 Add-Detalhe $Detalhes 'ERRO' $Ctx.Origem.Nome $a.Relativo $a.Bytes '' $r.Erro
             }
         }
-        $segundos = [math]::Max(1, ((Get-Date) - $inicio).TotalSeconds)
+        $segundos = [math]::Max([double]1, ((Get-Date) - $inicio).TotalSeconds)
         $pct = if ($totalBytes -gt 0) { [int](100.0 * $bytesFeitos / $totalBytes) } else { [int](100.0 * $feitos / $Arquivos.Count) }
         Write-Progress -Id 2 -Activity "$Atividade $($Ctx.Origem.Nome) (SHA-256)" -PercentComplete ([math]::Min(100, $pct)) `
             -Status ('{0} de {1} arquivos - {2} de {3} - {4}/s' -f $feitos, $Arquivos.Count, (Format-Tamanho $bytesFeitos), (Format-Tamanho $totalBytes), (Format-Tamanho ($bytesFeitos / $segundos)))
@@ -653,7 +666,7 @@ function Invoke-VerificacaoWBA {
 }
 
 Export-ModuleMember -Function @(
-    'Invoke-BackupWBA', 'Invoke-VerificacaoWBA', 'Invoke-Robocopy', 'Format-Tamanho', 'Write-Etapa',
+    'Invoke-BackupWBA', 'Get-ProgressoCopia', 'Invoke-VerificacaoWBA', 'Invoke-Robocopy', 'Format-Tamanho', 'Write-Etapa',
     'Read-Configuracao', 'ConvertFrom-TextoConfig', 'Assert-Configuracao', 'Read-TextoConfig', 'New-TextoConfig',
     'Save-TextoConfig', 'Get-OrigensSugeridas', 'Get-NomePadrao', 'Test-NomeValido', 'Resolve-CaminhoLocal',
     'Test-Dentro', 'Get-IdVersaoAnterior', 'Get-InfoDisco', 'Clear-CacheDisco', 'Assert-DestinoSeguro',
