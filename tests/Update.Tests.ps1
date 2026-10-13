@@ -19,7 +19,7 @@ Describe 'Safe one-click updater' {
         $other = Join-Path $TestDrive 'other'
         & git init --bare $remote 2>&1 | Out-Null
         & git clone $remote $client 2>&1 | Out-Null
-        & git -C $client switch -c main 2>&1 | Out-Null
+        & git -C $client checkout -b main 2>&1 | Out-Null
         & git -C $client config user.name 'Updater CI'
         & git -C $client config user.email 'updater@example.invalid'
         Copy-Item -LiteralPath $updater -Destination (Join-Path $client 'Atualizar.cmd')
