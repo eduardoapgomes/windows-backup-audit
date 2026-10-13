@@ -7,7 +7,7 @@ Describe 'Safe one-click updater' {
         $dir = New-Item -ItemType Directory (Join-Path $TestDrive 'zip install') -Force
         Copy-Item -LiteralPath $updater -Destination (Join-Path $dir.FullName 'Atualizar.cmd')
         Set-Content -LiteralPath (Join-Path $dir.FullName 'backup.local.json') -Value 'my config'
-        $output = & (Join-Path $dir.FullName 'Atualizar.cmd') 2>&1
+        $output = & (Join-Path $dir.FullName 'Atualizar.cmd') --no-pause 2>&1
         $LASTEXITCODE | Should -Be 2
         ($output -join ' ') | Should -Match 'ZIP'
         (Get-Content -LiteralPath (Join-Path $dir.FullName 'backup.local.json') -Raw) | Should -Match 'my config'
@@ -40,13 +40,13 @@ Describe 'Safe one-click updater' {
         & git -C $other push origin main 2>&1 | Out-Null
 
         Set-Content -LiteralPath (Join-Path $client 'backup.local.json') -Value 'private config'
-        $output = & (Join-Path $client 'Atualizar.cmd') 2>&1
+        $output = & (Join-Path $client 'Atualizar.cmd') --no-pause 2>&1
         $LASTEXITCODE | Should -Be 0
         (Test-Path -LiteralPath (Join-Path $client 'new-version.txt')) | Should -BeTrue
         (Get-Content -LiteralPath (Join-Path $client 'backup.local.json') -Raw) | Should -Match 'private config'
 
         Set-Content -LiteralPath (Join-Path $client 'Backup.ps1') -Value '# user change'
-        $output = & (Join-Path $client 'Atualizar.cmd') 2>&1
+        $output = & (Join-Path $client 'Atualizar.cmd') --no-pause 2>&1
         $LASTEXITCODE | Should -Be 3
         ($output -join ' ') | Should -Match 'modificacoes locais'
         (Get-Content -LiteralPath (Join-Path $client 'Backup.ps1') -Raw) | Should -Match 'user change'
