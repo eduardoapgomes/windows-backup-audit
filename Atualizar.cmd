@@ -1,5 +1,12 @@
 @echo off
 setlocal EnableExtensions
+call :atualizar
+set "UPDATE_EXIT=%ERRORLEVEL%"
+echo.
+if /I not "%~1"=="--no-pause" pause
+exit /b %UPDATE_EXIT%
+
+:atualizar
 cd /d "%~dp0"
 if errorlevel 1 (
     echo ERRO: nao foi possivel abrir a pasta do programa.
