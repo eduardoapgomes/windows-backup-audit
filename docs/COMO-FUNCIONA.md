@@ -70,6 +70,8 @@ O que mais custava tempo na versão 1 era, para **cada arquivo**: consultar o Wi
 8. **Pasta renomeada é movida dentro do HD**, sem copiar gigabytes de novo.
 9. **Exclusões por nome** (`node_modules`, `__pycache__`, `.venv`…) cortam a árvore inteira na listagem e no Robocopy.
 
+Resultado medido no CI (`tests\Comparar-Desempenho.ps1`, 1.504 arquivos e 112 MB): primeiro backup **6,7 s** (versão 1: 131 s), execução sem mudanças **0,1 s** (55 s), 10 arquivos alterados **0,3 s** (56 s). Na versão 1 a checagem de disco por arquivo foi simulada, então o custo real dela era ainda maior.
+
 ## Por que é seguro
 
 - **O Robocopy nunca sobrescreve**: `/XC /XN /XO` excluem arquivos “alterados”, “mais novos” e “mais antigos” — ou seja, ele só cria arquivos que **não existem** no destino. Quem decide atualizar é o programa, que antes move a versão antiga para `_VERSOES_ANTERIORES`. Mover nunca substitui um arquivo existente (`MoveFileEx` sem `REPLACE_EXISTING`).

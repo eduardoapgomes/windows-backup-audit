@@ -1,6 +1,8 @@
 @echo off
 setlocal EnableExtensions
-cd /d "%~dp0"
+rem Guardar a pasta antes de CALL :rotulo (dentro da subrotina, %0 e o rotulo).
+set "PASTA=%~dp0"
+cd /d "%PASTA%"
 title Windows Backup Audit
 set "SAIDA=0"
 
@@ -11,7 +13,7 @@ echo   WINDOWS BACKUP AUDIT  -  backup para HD externo
 echo   Nunca apaga arquivos. Cada copia e conferida por SHA-256.
 echo ==============================================================
 echo.
-if not exist "%~dp0configuracao.txt" (
+if not exist "%PASTA%configuracao.txt" (
     echo   PRIMEIRO USO: conecte o HD externo e escolha 4 - Configurar.
     echo.
 )
@@ -44,8 +46,8 @@ pause
 goto menu
 
 :guia
-if exist "%~dp0docs\GUIA-RAPIDO.md" (
-    start "" notepad.exe "%~dp0docs\GUIA-RAPIDO.md"
+if exist "%PASTA%docs\GUIA-RAPIDO.md" (
+    start "" notepad.exe "%PASTA%docs\GUIA-RAPIDO.md"
 ) else (
     start "" "https://github.com/eduardoapgomes/windows-backup-audit/blob/main/docs/GUIA-RAPIDO.md"
 )
@@ -54,14 +56,14 @@ goto menu
 :executar
 set "SAIDA=3"
 for %%F in ("Backup.ps1" "src\Backup.Core.psm1" "src\Nativo.cs") do (
-    if not exist "%~dp0%%~F" (
+    if not exist "%PASTA%%%~F" (
         echo.
-        echo   ERRO: o arquivo %%~F nao foi encontrado em "%~dp0".
+        echo   ERRO: o arquivo %%~F nao foi encontrado em "%PASTA%".
         echo   A instalacao esta incompleta. Extraia o ZIP inteiro em uma pasta nova
         echo   ou use Atualizar.cmd. Veja docs\ATUALIZAR.md. Nada foi feito.
         exit /b 3
     )
 )
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0Backup.ps1" %*
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%PASTA%Backup.ps1" %*
 set "SAIDA=%ERRORLEVEL%"
 exit /b %SAIDA%

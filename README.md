@@ -103,6 +103,16 @@ O menu e o `Backup.ps1` terminam com um código: **0** tudo certo · **1** aviso
 - SHA-256 pela criptografia do Windows (usa as instruções SHA da CPU quando existem), lendo **origem e HD ao mesmo tempo**; arquivos pequenos são conferidos em paralelo.
 - Bibliotecas e caches regeneráveis (`node_modules`, `__pycache__`, `.venv`…) ficam fora por padrão. `.git` **não** é excluído: o histórico local de um repositório é dado seu.
 
+Medição no Windows do CI (1.504 arquivos, 112 MB, mesmo SSD; a checagem física do HD foi simulada nas duas versões, o que favorece a versão 1):
+
+| | Versão 1 | Versão 2 |
+|---|---:|---:|
+| Primeiro backup | 131 s | **6,7 s** |
+| Sem mudanças | 55 s | **0,1 s** |
+| 10 arquivos alterados | 56 s | **0,3 s** |
+
+Com um HD USB, o primeiro backup é limitado pela velocidade de gravação do HD; as execuções seguintes continuam rápidas porque só leem o que mudou. Reproduza com `tests\Comparar-Desempenho.ps1`.
+
 Como tudo funciona, passo a passo, e quais ideias do relatório de pesquisa foram adotadas (e quais não, e por quê): **[Como funciona](docs/COMO-FUNCIONA.md)**.
 
 ## Documentação

@@ -82,4 +82,4 @@ Remove-Item -LiteralPath $raiz -Recurse -Force -ErrorAction SilentlyContinue
 $linha = ($resultados.GetEnumerator() | ForEach-Object { "$($_.Key): $($_.Value) s" }) -join ' | '
 Write-Host ''
 $resultados.GetEnumerator() | ForEach-Object { Write-Host ('{0,-28} {1} s' -f $_.Key, $_.Value) }
-if ($env:GITHUB_ACTIONS) { Write-Host "::notice title=Desempenho ($($Arquivos + $Grandes) arquivos, $totalMB MB)::$linha" }
+if ($env:GITHUB_ACTIONS) { Write-Host "::notice title=Desempenho - $($Arquivos + $Grandes) arquivos e $totalMB MB::$linha" }
