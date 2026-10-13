@@ -24,19 +24,25 @@ if errorlevel 1 goto semgit
 if not exist "%PROJECT_DIR%.git" goto zip
 
 set "BRANCH="
-for /f "delims=" %%B in ('git -C "%PROJECT_DIR%" branch --show-current 2^>nul') do set "BRANCH=%%B"
-if not defined BRANCH goto falha_git
+for /f "delims=" %%B in ('git branch --show-current 2^>nul') do set "BRANCH=%%B"
+if not defined BRANCH (
+    echo ERRO: nao foi possivel identificar a branch Git atual.
+    goto falha_git
+)
 if /I not "%BRANCH%"=="main" goto outra_branch
 
 rem Nunca descartar alteracoes locais ou fazer merge automatico.
-git -C "%PROJECT_DIR%" diff --quiet
+git diff --quiet
 if errorlevel 1 goto alteracoes
-git -C "%PROJECT_DIR%" diff --cached --quiet
+git diff --cached --quiet
 if errorlevel 1 goto alteracoes
 
 echo Atualizando a branch main do repositorio origin...
-git -C "%PROJECT_DIR%" pull --ff-only origin main
-if errorlevel 1 goto falha_git
+git pull --ff-only origin main
+if errorlevel 1 (
+    echo ERRO: git pull --ff-only origin main falhou.
+    goto falha_git
+)
 if not exist "%PROJECT_DIR%Backup.ps1" goto incompleto
 if not exist "%PROJECT_DIR%src\Backup.Core.psm1" goto incompleto
 echo.
