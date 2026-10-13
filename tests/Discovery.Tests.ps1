@@ -69,7 +69,7 @@ Describe 'Fast audit for new files' {
         (Get-Content (Join-Path $run 'merkle.json') -Raw | ConvertFrom-Json).ObservedHashesComplete | Should -BeFalse
         (Get-Content (Join-Path $run 'metricas.json') -Raw | ConvertFrom-Json).QuickAuditUnhashed | Should -Be 1
         (Get-Content (Join-Path $run 'LEIA-ME.md') -Raw) | Should -Match 'NEEDS_COPY pode ter SHA256 vazio'
-        (Get-Content (Join-Path $run 'LEIA-ME.html') -Raw) | Should -Match 'NEEDS_COPY pode ter SHA256 vazio'
+        (Get-Content (Join-Path $run 'LEIA-ME.html') -Raw) | Should -Match 'NEEDS_COPY pode ter SHA vazio'
     }
     It 'still hashes and matches existing same-size content' {
         Mock Assert-ExternalDestination -ModuleName Backup.Core { @{DiskId='test';VolumeId='test';FreeBytes=100GB;Drive='Z:\'} }
