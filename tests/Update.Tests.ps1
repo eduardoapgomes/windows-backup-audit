@@ -6,7 +6,7 @@ Describe 'Safe one-click updater' {
         $dir = New-Item -ItemType Directory (Join-Path $TestDrive 'zip install') -Force
         Copy-Item -LiteralPath $updater -Destination (Join-Path $dir.FullName 'Atualizar.cmd')
         Set-Content -LiteralPath (Join-Path $dir.FullName 'backup.local.json') -Value 'my config'
-        $output = & (Join-Path $dir.FullName 'Atualizar.cmd') --no-pause 2>&1
+        $output = & (Join-Path $dir.FullName 'Atualizar.cmd') --no-pause 2>$null
         $LASTEXITCODE | Should -Be 2
         ($output -join ' ') | Should -Match 'ZIP'
         (Get-Content -LiteralPath (Join-Path $dir.FullName 'backup.local.json') -Raw) | Should -Match 'my config'
@@ -16,9 +16,10 @@ Describe 'Safe one-click updater' {
         $remote = Join-Path $TestDrive 'origin.git'
         $client = Join-Path $TestDrive 'project with spaces'
         $other = Join-Path $TestDrive 'other'
-        & git init --bare $remote 2>&1 | Out-Null
-        & git clone $remote $client 2>&1 | Out-Null
-        & git -C $client checkout -b main 2>&1 | Out-Null
+        & git init --bare $remote 2>$null | Out-Null
+        & git clone --quiet $remote $client 2>$null | Out-Null
+        $LASTEXITCODE | Should -Be 0
+        & git -C $client checkout -b main 2>$null | Out-Null
         & git -C $client config user.name 'Updater CI'
         & git -C $client config user.email 'updater@example.invalid'
         Copy-Item -LiteralPath $updater -Destination (Join-Path $client 'Atualizar.cmd')
@@ -26,26 +27,29 @@ Describe 'Safe one-click updater' {
         Set-Content -LiteralPath (Join-Path $client 'Backup.ps1') -Value '# test entry'
         Set-Content -LiteralPath (Join-Path $client 'src\Backup.Core.psm1') -Value '# test module'
         Set-Content -LiteralPath (Join-Path $client '.gitignore') -Value 'backup.local.json'
-        & git -C $client add . 2>&1 | Out-Null
-        & git -C $client commit -m 'initial' 2>&1 | Out-Null
-        & git -C $client push -u origin main 2>&1 | Out-Null
+        & git -C $client add . 2>$null | Out-Null
+        & git -C $client commit -m 'initial' 2>$null | Out-Null
+        & git -C $client push -u origin main 2>$null | Out-Null
+        $LASTEXITCODE | Should -Be 0
 
-        & git clone --branch main $remote $other 2>&1 | Out-Null
+        & git clone --quiet --branch main $remote $other 2>$null | Out-Null
+        $LASTEXITCODE | Should -Be 0
         & git -C $other config user.name 'Updater CI'
         & git -C $other config user.email 'updater@example.invalid'
         Set-Content -LiteralPath (Join-Path $other 'new-version.txt') -Value 'latest'
-        & git -C $other add new-version.txt 2>&1 | Out-Null
-        & git -C $other commit -m 'new version' 2>&1 | Out-Null
-        & git -C $other push origin main 2>&1 | Out-Null
+        & git -C $other add new-version.txt 2>$null | Out-Null
+        & git -C $other commit -m 'new version' 2>$null | Out-Null
+        & git -C $other push origin main 2>$null | Out-Null
+        $LASTEXITCODE | Should -Be 0
 
         Set-Content -LiteralPath (Join-Path $client 'backup.local.json') -Value 'private config'
-        $output = & (Join-Path $client 'Atualizar.cmd') --no-pause 2>&1
+        $output = & (Join-Path $client 'Atualizar.cmd') --no-pause 2>$null
         $LASTEXITCODE | Should -Be 0
         (Test-Path -LiteralPath (Join-Path $client 'new-version.txt')) | Should -BeTrue
         (Get-Content -LiteralPath (Join-Path $client 'backup.local.json') -Raw) | Should -Match 'private config'
 
         Set-Content -LiteralPath (Join-Path $client 'Backup.ps1') -Value '# user change'
-        $output = & (Join-Path $client 'Atualizar.cmd') --no-pause 2>&1
+        $output = & (Join-Path $client 'Atualizar.cmd') --no-pause 2>$null
         $LASTEXITCODE | Should -Be 3
         ($output -join ' ') | Should -Match 'modificacoes locais'
         (Get-Content -LiteralPath (Join-Path $client 'Backup.ps1') -Raw) | Should -Match 'user change'
