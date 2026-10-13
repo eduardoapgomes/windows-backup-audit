@@ -56,6 +56,7 @@ Describe 'Safe one-click updater' {
 
         Set-Content -LiteralPath (Join-Path $client 'backup.local.json') -Value 'private config'
         $result = Invoke-TestUpdater -Path (Join-Path $client 'Atualizar.cmd')
+        if ($result.ExitCode -ne 0) { throw ("Atualizar.cmd saiu com codigo {0}: {1}" -f $result.ExitCode, ($result.Output -join ' | ')) }
         $result.ExitCode | Should -Be 0
         (Test-Path -LiteralPath (Join-Path $client 'new-version.txt')) | Should -BeTrue
         (Get-Content -LiteralPath (Join-Path $client 'backup.local.json') -Raw) | Should -Match 'private config'
