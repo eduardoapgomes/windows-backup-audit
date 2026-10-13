@@ -224,8 +224,8 @@ function Invoke-VerificacaoArquivos {
         $origens = New-Object 'string[]' $n
         $destinos = New-Object 'string[]' $n
         for ($i = 0; $i -lt $n; $i++) {
-            $origens[$i] = Join-Path $Ctx.Origem.Caminho $lote.Itens[$i].Relativo
-            $destinos[$i] = Join-Path $Ctx.PastaDestino $lote.Itens[$i].Relativo
+            $origens[$i] = [IO.Path]::Combine($Ctx.Origem.Caminho, $lote.Itens[$i].Relativo)
+            $destinos[$i] = [IO.Path]::Combine($Ctx.PastaDestino, $lote.Itens[$i].Relativo)
         }
         $resultados = [WindowsBackupAudit.Nativo]::VerificarLote($origens, $destinos, $lote.Paralelo)
         $agora = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')
@@ -494,10 +494,15 @@ function Invoke-EtapasDeGravacao {
         if (-not $ctx.Plano.Conferir.Count) { continue }
         Write-Etapa "Conferindo $($ctx.Plano.Conferir.Count) arquivo(s) de $($ctx.Origem.Nome) que já estão no HD"
         $divergentes = Invoke-VerificacaoArquivos -Ctx $ctx -Arquivos $ctx.Plano.Conferir.ToArray() -EstadoOk 'CONFERIDO' -Detalhes $detalhes -DevolverDivergentes
-        foreach ($a in $divergentes) {
+        if ($divergentes.Count) {
             # A cópia no HD é diferente da origem: tratada como alterada (a antiga é guardada).
-            [void]$ctx.Plano.Conferir.Remove($a)
-            $ctx.Plano.Alterados.Add($a)
+            $diferentes = @{}
+            foreach ($a in $divergentes) { $diferentes[$a] = $true }
+            $restantes = New-Object 'Collections.Generic.List[WindowsBackupAudit.Arquivo]'
+            foreach ($a in $ctx.Plano.Conferir) {
+                if ($diferentes.ContainsKey($a)) { $ctx.Plano.Alterados.Add($a) } else { $restantes.Add($a) }
+            }
+            $ctx.Plano.Conferir = $restantes
         }
         Save-Manifesto $ctx
     }
@@ -533,13 +538,15 @@ function Invoke-EtapasDeGravacao {
                 }
             }
         }
-        $copiar = New-Object 'Collections.Generic.List[object]'
+        $novos = New-Object 'Collections.Generic.List[object]'
+        $alterados = New-Object 'Collections.Generic.List[object]'
         $bytesCopiar = [long]0
-        foreach ($a in $ctx.Plano.Novos) { if (-not $a.Estado) { $copiar.Add($a); $bytesCopiar += $a.Bytes } }
-        foreach ($a in $ctx.Plano.Alterados) { if (-not $a.Estado) { $copiar.Add($a); $bytesCopiar += $a.Bytes } }
-        if ($copiar.Count) {
+        foreach ($a in $ctx.Plano.Novos) { if (-not $a.Estado) { $novos.Add($a); $bytesCopiar += $a.Bytes } }
+        foreach ($a in $ctx.Plano.Alterados) { if (-not $a.Estado) { $alterados.Add($a); $bytesCopiar += $a.Bytes } }
+        $quantos = $novos.Count + $alterados.Count
+        if ($quantos) {
             Assert-MesmoDisco $Destino $caminhosOrigem $disco
-            Write-Etapa "Copiando $($copiar.Count) arquivo(s) de $nome ($(Format-Tamanho $bytesCopiar)) com Robocopy"
+            Write-Etapa "Copiando $quantos arquivo(s) de $nome ($(Format-Tamanho $bytesCopiar)) com Robocopy"
             if (-not (Test-Path -LiteralPath $ctx.PastaDestino)) { New-Item -ItemType Directory -Path $ctx.PastaDestino -Force | Out-Null }
             $ctx.Log = Join-Path $execucao "robocopy-$nome.log"
             $excluirPastas = [string[]]@(@($Config.ExcluirPastas) + @($ctx.Plano.Origem.PastasExcluir) | Where-Object { $_ })
@@ -550,11 +557,9 @@ function Invoke-EtapasDeGravacao {
             if ($ctx.CodigoRobocopy -ge 8) {
                 Write-Etapa "Robocopy terminou com código $($ctx.CodigoRobocopy): alguns arquivos falharam. Cada arquivo será conferido." Yellow
             }
-            $novos = @($copiar | Where-Object { $ctx.Plano.Alterados.Contains($_) -eq $false })
-            $alterados = @($copiar | Where-Object { $ctx.Plano.Alterados.Contains($_) })
             Write-Etapa "Conferindo as cópias de $nome por SHA-256"
-            $null = Invoke-VerificacaoArquivos -Ctx $ctx -Arquivos $novos -EstadoOk 'COPIADO' -Detalhes $detalhes -Atividade 'Conferindo cópias de'
-            $null = Invoke-VerificacaoArquivos -Ctx $ctx -Arquivos $alterados -EstadoOk 'ATUALIZADO' -Detalhes $detalhes -Atividade 'Conferindo cópias de'
+            $null = Invoke-VerificacaoArquivos -Ctx $ctx -Arquivos $novos.ToArray() -EstadoOk 'COPIADO' -Detalhes $detalhes -Atividade 'Conferindo cópias de'
+            $null = Invoke-VerificacaoArquivos -Ctx $ctx -Arquivos $alterados.ToArray() -EstadoOk 'ATUALIZADO' -Detalhes $detalhes -Atividade 'Conferindo cópias de'
         }
         Save-Manifesto $ctx
     }
@@ -605,7 +610,7 @@ function Invoke-VerificacaoWBA {
                 $n = $lote.Itens.Count
                 $caminhos = New-Object 'string[]' $n; $tamanhos = New-Object 'long[]' $n; $shas = New-Object 'string[]' $n
                 for ($i = 0; $i -lt $n; $i++) {
-                    $caminhos[$i] = Join-Path $pasta $lote.Itens[$i].Relativo
+                    $caminhos[$i] = [IO.Path]::Combine($pasta, $lote.Itens[$i].Relativo)
                     $tamanhos[$i] = $lote.Itens[$i].Bytes
                     $shas[$i] = $lote.Itens[$i].Sha256
                 }
