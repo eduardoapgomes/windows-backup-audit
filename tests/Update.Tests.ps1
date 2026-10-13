@@ -1,6 +1,5 @@
 BeforeAll {
     $updater = Join-Path $PSScriptRoot '..\Atualizar.cmd'
-    $hasGit = $null -ne (Get-Command git.exe -ErrorAction SilentlyContinue)
 }
 Describe 'Safe one-click updater' {
     It 'refuses a ZIP installation without modifying its files' {
@@ -13,7 +12,7 @@ Describe 'Safe one-click updater' {
         (Get-Content -LiteralPath (Join-Path $dir.FullName 'backup.local.json') -Raw) | Should -Match 'my config'
     }
 
-    It 'fast-forwards main from an offline origin and preserves manual config; rejects dirty files' -Skip:(-not $hasGit) {
+    It 'fast-forwards main from an offline origin and preserves manual config; rejects dirty files' -Skip:($null -eq (Get-Command git.exe -ErrorAction SilentlyContinue)) {
         $remote = Join-Path $TestDrive 'origin.git'
         $client = Join-Path $TestDrive 'project with spaces'
         $other = Join-Path $TestDrive 'other'
