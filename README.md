@@ -4,9 +4,27 @@
 
 > **Importante:** o modo automático é **focado**, não uma busca exaustiva de todos os discos. Pastas fora do escopo precisam ser incluídas manualmente. Não formate o computador apenas porque um relatório não mostra erros.
 
+## Instalar e atualizar sem misturar versões
+
+**Primeira instalação:** para receber atualizações em um clique, instale [Git para Windows](https://git-scm.com/downloads/win) e, no PowerShell, execute:
+
+```powershell
+New-Item -ItemType Directory -Force "$env:USERPROFILE\Projetos" | Out-Null
+Set-Location "$env:USERPROFILE\Projetos"
+git clone --branch main https://github.com/eduardoapgomes/windows-backup-audit.git
+Set-Location .\windows-backup-audit
+.\Iniciar.cmd
+```
+
+**Já tem uma instalação Git?** Feche o programa e dê dois cliques em **`Atualizar.cmd`**. Ele atualiza somente a branch `main` com `git pull --ff-only`, sem descartar alterações locais. Se preferir o terminal, dentro da pasta do projeto use `git pull --ff-only origin main`. **Não execute `git clone` dentro de uma pasta que já existe.**
+
+**Baixou ZIP ou apareceu “Backup.ps1 não existe”?** Baixe o [ZIP atualizado da `main`](https://github.com/eduardoapgomes/windows-backup-audit/archive/refs/heads/main.zip), **extraia inteiro em uma pasta nova**, confirme que `Iniciar.cmd`, `Backup.ps1` e `src\Backup.Core.psm1` estão juntos. Se usar modo manual, copie apenas `backup.local.json` da instalação antiga. **Não apague o backup no USB.** Não é necessário instalar Git nem Python para executar a auditoria e o backup.
+
+[Instalação, atualização e correção de erros — passo a passo](docs/ATUALIZAR.md).
+
 ## Comece em 4 passos
 
-1. No Windows 10/11, conecte um **HD/SSD USB externo NTFS**. Baixe o projeto em **Code → Download ZIP** e extraia **a pasta inteira** (ou clone com Git).
+1. No Windows 10/11, conecte um **HD/SSD USB externo NTFS**. Use a instalação Git ou extraia o ZIP **inteiro em uma pasta nova**. Confira que `Backup.ps1` existe ao lado de `Iniciar.cmd`.
 2. Abra **Iniciar.cmd**, opção **1 — Auditoria automática**. Selecione o destino externo. **Não copia arquivos de origem.**
 3. Abra o **LEIA-ME.html** gerado, confira as pastas **INCLUDED**, os avisos **REVIEW**, arquivos **NEEDS_COPY** e erros. Adicione pastas importantes que ficaram de fora usando a opção **3**.
 4. Só depois use a opção **2 — Backup automático**, no **mesmo destino**. Confira o novo relatório e **teste restaurar alguns arquivos**.
@@ -75,7 +93,7 @@ Se o menu informar que `Backup.ps1` não existe, confirme que `Iniciar.cmd`, `Ba
 
 Este projeto **não é imagem do Windows, snapshot VSS nem sistema completo de restauração**. Ele não assegura consistência de bancos abertos, permissões/ACLs, certificados, EFS ou dados que ficaram fora das pastas selecionadas. Antes de formatar: revisar cobertura, resolver erros, manter segunda cópia e testar restauração.
 
-- [Guia rápido](docs/GUIA-RAPIDO.md) · [Cobertura e aplicativos especiais](docs/COVERAGE.md) · [Segurança, interrupções e retomada](docs/SAFETY.md)
+- [Instalar e atualizar](docs/ATUALIZAR.md) · [Guia rápido](docs/GUIA-RAPIDO.md) · [Cobertura e aplicativos especiais](docs/COVERAGE.md) · [Segurança, interrupções e retomada](docs/SAFETY.md)
 - [Merkle, MinHash e custos](docs/INCREMENTAL.md) · [Mapa visual opcional](docs/ORGANIZATION.md) · [Validação e testes](docs/VALIDATION.md)
 - [Pesquisa de agrupamentos](docs/HIERARCHY.md) · [Publicação segura](docs/GITHUB.md)
 
