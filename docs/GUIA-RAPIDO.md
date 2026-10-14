@@ -65,6 +65,12 @@ O relatório fica no HD em `_CONTROLE\execucoes\<data>\RELATORIO.html`. A opçã
 
 Escolha **toda semana** ou **todo dia** e o horário. O Windows executa o backup sozinho, sem perguntas. Se o computador estiver desligado na hora, o backup roda quando ele ligar. Se o HD não estiver conectado (ou houver erros), **aparece um aviso na tela**. A primeira execução precisa ser feita pelo menu.
 
+### Faltou alguma pasta? (opção 8)
+
+**Procurar arquivos fora do backup** percorre o seu perfil, a pasta Pública e as pastas da raiz dos discos internos (não as do Windows e de programas) e lista, por pasta, os arquivos pessoais que **não** estão em nenhuma pasta de `[ORIGENS]`: documentos, planilhas, apresentações, fotos, vídeos, áudio, código e compactados. Em `AppData` e nas pastas ocultas do perfil (`.vscode`, `.conda`…), onde ficam milhares de arquivos de programas, procura só o que não pode ser perdido: **carteiras de criptomoedas** (`wallet.dat`, `.wallet`), **cofres de senha** (`.kdbx`), **chaves** SSH e GPG e **e-mail** do Outlook (`.pst`). Esses aparecem primeiro, em vermelho.
+
+Só lê nomes, tamanhos e datas (leva segundos), não precisa do HD e não muda nada. Para cada pasta da lista, decida: se é sua, acrescente em `[ORIGENS]`; se é de um programa ou cache, deixe de fora. A lista completa, arquivo por arquivo, fica em `relatorios\fora-do-backup-<data>.tsv` (abre no Excel). Rode de novo sempre que instalar um programa novo ou criar uma pasta de trabalho fora das de sempre.
+
 ### Rotina recomendada
 
 - **Backup:** toda semana (ou todo dia, se você produz muita coisa).

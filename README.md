@@ -31,6 +31,7 @@ Passo a passo detalhado e solução de problemas: **[Guia rápido](docs/GUIA-RAP
 | **4. Configurar** | Cria ou edita `configuracao.txt` (pastas, HD de destino, exclusões) |
 | **5. Agendar** | Cria ou remove o backup automático no Agendador de Tarefas do Windows |
 | **6. Abrir o último relatório** | Abre o relatório da última execução gravado no HD |
+| **8. Procurar arquivos fora do backup** | Lista documentos, fotos, código, carteiras e chaves em pastas que não estão na configuração. Não precisa do HD |
 
 ## A configuração é um texto simples
 

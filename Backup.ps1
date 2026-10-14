@@ -11,6 +11,7 @@ Ações (-Acao):
   Configurar  cria ou edita configuracao.txt (pastas e HD)
   Agendar     cria ou remove o backup automático no Agendador de Tarefas
   Relatorio   abre o último relatório gravado no HD
+  Cobertura   procura arquivos pessoais fora das pastas do backup (não precisa do HD)
 
 Códigos de saída: 0 tudo certo; 1 avisos (arquivos só na nuvem); 2 erros ou
 interrompido; 3 não executado (configuração, HD ausente ou cancelado).
@@ -29,7 +30,7 @@ Confere cerca de 10% dos arquivos do HD, escolhidos ao acaso.
 #>
 [CmdletBinding()]
 param(
-    [ValidateSet('Backup', 'Simular', 'Verificar', 'Configurar', 'Agendar', 'Relatorio')][string]$Acao = 'Backup',
+    [ValidateSet('Backup', 'Simular', 'Verificar', 'Configurar', 'Agendar', 'Relatorio', 'Cobertura')][string]$Acao = 'Backup',
     [string]$Config,
     [ValidateRange(1, 128)][int]$Threads = 8,
     [ValidateRange(1, 100)][int]$Amostra = 100,
@@ -63,6 +64,11 @@ try {
     } elseif ($Acao -eq 'Agendar') {
         Invoke-AssistenteAgendamento -Script $PSCommandPath
         $codigo = 0
+    } elseif ($Acao -eq 'Cobertura') {
+        $cfg = Read-Configuracao $Config
+        $r = Find-ArquivosForaDoBackup -Config $cfg -PastaRelatorio (Join-Path $PSScriptRoot 'relatorios')
+        Show-Cobertura $r
+        $codigo = if ($r.Grupos.Count) { 1 } else { 0 }
     } else {
         if (-not (Test-Path -LiteralPath $Config -PathType Leaf) -and (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'backup.local.json'))) {
             throw 'Esta versão usa configuracao.txt. Abra Iniciar.cmd e escolha Configurar: suas pastas da versão anterior serão importadas.'

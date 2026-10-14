@@ -18,7 +18,7 @@ if (-not ('WindowsBackupAudit.Nativo' -as [type])) {
     $codigo = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'Nativo.cs'), [Text.Encoding]::UTF8)
     Add-Type -TypeDefinition $codigo -Language CSharp -IgnoreWarnings
 }
-foreach ($parte in 'Config.ps1', 'Destino.ps1', 'Relatorio.ps1', 'Agendamento.ps1', 'Assistente.ps1') {
+foreach ($parte in 'Config.ps1', 'Destino.ps1', 'Relatorio.ps1', 'Agendamento.ps1', 'Assistente.ps1', 'Cobertura.ps1') {
     . (Join-Path $PSScriptRoot $parte)
 }
 
@@ -790,7 +790,7 @@ function Invoke-VerificacaoWBA {
 
 Export-ModuleMember -Function @(
     'Invoke-BackupWBA', 'Get-ProgressoCopia', 'Invoke-VerificacaoWBA', 'Invoke-Robocopy', 'Format-Tamanho', 'Write-Etapa',
-    'Get-FalhasRobocopy', 'Get-MotivoErro',
+    'Get-FalhasRobocopy', 'Get-MotivoErro', 'Find-ArquivosForaDoBackup', 'Show-Cobertura', 'Get-RaizesCobertura', 'Get-TipoPessoal',
     'Read-Configuracao', 'ConvertFrom-TextoConfig', 'Assert-Configuracao', 'Read-TextoConfig', 'New-TextoConfig',
     'Save-TextoConfig', 'Get-OrigensSugeridas', 'Get-NomePadrao', 'Test-NomeValido', 'Resolve-CaminhoLocal',
     'Test-Dentro', 'Get-IdVersaoAnterior', 'Get-InfoDisco', 'Clear-CacheDisco', 'Assert-DestinoSeguro',

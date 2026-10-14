@@ -24,11 +24,12 @@ echo   4. Configurar pastas e HD de destino
 echo   5. Agendar backup automatico
 echo   6. Abrir o ultimo relatorio
 echo   7. Guia rapido
+echo   8. Procurar arquivos fora do backup  (nao precisa do HD)
 echo   0. Sair
 echo.
-choice /c 12345670 /n /m "Escolha uma opcao: "
+choice /c 123456780 /n /m "Escolha uma opcao: "
 set "OPCAO=%ERRORLEVEL%"
-if "%OPCAO%"=="8" exit /b 0
+if "%OPCAO%"=="9" exit /b 0
 if "%OPCAO%"=="7" goto guia
 if "%OPCAO%"=="1" call :executar -Acao Backup
 if "%OPCAO%"=="2" call :executar -Acao Simular
@@ -36,6 +37,7 @@ if "%OPCAO%"=="3" call :executar -Acao Verificar
 if "%OPCAO%"=="4" call :executar -Acao Configurar
 if "%OPCAO%"=="5" call :executar -Acao Agendar
 if "%OPCAO%"=="6" call :executar -Acao Relatorio
+if "%OPCAO%"=="8" call :executar -Acao Cobertura
 echo.
 if "%SAIDA%"=="0" echo   Concluido.
 if "%SAIDA%"=="1" echo   AVISO: concluido com avisos. Veja o relatorio.

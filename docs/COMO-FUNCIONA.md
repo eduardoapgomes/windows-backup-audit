@@ -7,12 +7,13 @@ Este documento descreve o motor da versão 2: o fluxo de um backup, como ele dec
 | Arquivo | Papel |
 |---|---|
 | `Iniciar.cmd` | Menu. Confere se a instalação está completa e chama `Backup.ps1` |
-| `Backup.ps1` | Linha de comando (`-Acao Backup/Simular/Verificar/Configurar/Agendar/Relatorio`) e códigos de saída |
+| `Backup.ps1` | Linha de comando (`-Acao Backup/Simular/Verificar/Configurar/Agendar/Relatorio/Cobertura`) e códigos de saída |
 | `src\Backup.Core.psm1` | Fluxo do backup e da verificação de integridade |
 | `src\Nativo.cs` | Trabalho pesado em C#: listar pastas, comparar listas, SHA-256, mover arquivos, manifesto |
 | `src\Config.ps1` | Leitura, validação e criação de `configuracao.txt` |
 | `src\Destino.ps1` | Regras do HD de destino e localização do HD quando a letra muda |
 | `src\Relatorio.ps1` | `RELATORIO.html`, `resumo.json` e resumo no console |
+| `src\Cobertura.ps1` | Procurar arquivos pessoais fora das pastas do backup (opção 8) |
 | `src\Agendamento.ps1`, `src\Assistente.ps1` | Agendador de Tarefas e perguntas do menu |
 
 O C# é compilado na hora pelo próprio PowerShell (`Add-Type`) e foi escrito para o compilador do Windows PowerShell 5.1 (C# 5). Funciona igual no PowerShell 7.
