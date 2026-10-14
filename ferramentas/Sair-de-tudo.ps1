@@ -178,6 +178,8 @@ function Show-PassosManuais {
     Write-Host ' FALTA FAZER À MÃO (alguns cliques):' -ForegroundColor Yellow
     Write-Host ' 1. OneDrive: ícone da nuvem perto do relógio > engrenagem > Configurações > Conta >'
     Write-Host '    "Desvincular este PC". Os arquivos da pasta OneDrive ficam no PC; só param de sincronizar.'
+    Write-Host '    Faça isso ANTES de apagar qualquer coisa da pasta OneDrive: com ele ligado, apagar no PC' -ForegroundColor Yellow
+    Write-Host '    apaga também na nuvem e nos seus outros aparelhos.' -ForegroundColor Yellow
     Write-Host ' 2. Configurações > Contas > Email e contas: remova as contas de "Contas usadas por outros aplicativos".'
     if ($conta -eq 'MicrosoftAccount') {
         Write-Host ' 3. Você entra no Windows com a conta Microsoft. Em Configurações > Contas > Suas informações,' -ForegroundColor Yellow
@@ -193,10 +195,10 @@ function Show-PassosManuais {
     Write-Host '    - Google: myaccount.google.com > Segurança > Seus dispositivos > este PC > Sair.'
     Write-Host '    - Microsoft: account.microsoft.com > Dispositivos > remova este PC.'
     Write-Host '    - WhatsApp e Telegram no celular: Aparelhos conectados / Dispositivos > desconecte o PC.'
-    $sensiveis = @(
-        (Join-Path $roaming 'Bitcoin\wallets'), (Join-Path $roaming 'Bisq'), (Join-Path $perfil '.rfb'),
-        (Join-Path $perfil '.serpro'), (Join-Path $perfil '.receitanet'), 'C:\Dados\Imposto de Renda') |
-        Where-Object { Test-Path -LiteralPath $_ }
+    $sensiveis = @(@(
+            (Join-Path $roaming 'Bitcoin\wallets'), (Join-Path $roaming 'Bisq'), (Join-Path $perfil '.rfb'),
+            (Join-Path $perfil '.serpro'), (Join-Path $perfil '.receitanet'), 'C:\Dados\Imposto de Renda') |
+            Where-Object { Test-Path -LiteralPath $_ })
     if ($sensiveis.Count) {
         Write-Host ''
         Write-Host ' CONTINUAM NO PC (você escolheu manter os arquivos; já estão no backup):' -ForegroundColor Yellow
