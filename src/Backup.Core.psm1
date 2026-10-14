@@ -677,7 +677,9 @@ function Invoke-EtapasDeGravacao {
             $ctx.CodigoRobocopy = Invoke-Robocopy -Origem $ctx.Origem.Caminho -Destino $ctx.PastaDestino `
                 -ExcluirPastas $excluirPastas -ExcluirArquivos $excluirArquivos -Log $ctx.Log -Threads $Threads `
                 -BytesPrevistos $bytesCopiar -Rotulo $nome
-            $extra = Invoke-PassadaNomeCurto -Ctx $ctx -Pendentes (@($novos) + @($alterados)) -ExcluirPastas $excluirPastas `
+            $pendentes = New-Object 'Collections.Generic.List[object]'
+            $pendentes.AddRange($novos); $pendentes.AddRange($alterados)
+            $extra = Invoke-PassadaNomeCurto -Ctx $ctx -Pendentes $pendentes.ToArray() -ExcluirPastas $excluirPastas `
                 -ExcluirArquivos $excluirArquivos -Threads $Threads
             if ($null -ne $extra) { $ctx.CodigoRobocopy = $ctx.CodigoRobocopy -bor $extra }
             if ($ctx.CodigoRobocopy -ge 8) {

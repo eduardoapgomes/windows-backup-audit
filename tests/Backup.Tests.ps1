@@ -61,6 +61,7 @@ Describe 'Backup de ponta a ponta' {
     It 'primeiro backup copia, confere e exclui o que deve' {
         $c = New-Cenario
         $r = Invoke-Teste $c
+        $r.Falha | Should -BeNullOrEmpty     # se falhar, mostra o motivo da interrupção
         $r.Situacao | Should -Be 'OK'
         $r.CodigoSaida | Should -Be 0
         Get-Soma $r 'Copiados' | Should -Be 6
