@@ -1,5 +1,15 @@
 # Mudanças
 
+## 2.0.1
+
+Correções a partir do primeiro backup real (257 mil arquivos, 45 GB).
+
+- **Arquivos pulados pelo nome curto 8.3**: o Robocopy compara as exclusões também com o nome curto, e `script.tmpl` (`SCRIPT~1.TMP`) era pulado por causa de `*.tmp` e aparecia como erro. A listagem agora lê o nome curto e esses itens são copiados numa segunda passada.
+- **Pausas no meio do backup**: um clique na janela (Edição Rápida do console) pausava o programa até apertar uma tecla, e o computador podia suspender. Durante backup e verificação a Edição Rápida fica desligada e o Windows é avisado para não suspender.
+- **Conferência lê do HD, não do cache**: a cópia é lida com `FILE_FLAG_NO_BUFFERING`, para o SHA-256 confirmar o que foi gravado no disco.
+- **Motivo de cada falha do Robocopy** no relatório (por exemplo, “o arquivo estava em uso por outro programa”), lido do log.
+- **`site-packages` excluído por padrão** em configurações novas: bibliotecas Python reinstaláveis eram 94% dos arquivos de uma pasta de projetos. Em configurações existentes, acrescente a linha em `[EXCLUIR_PASTAS]`.
+
 ## 2.0.0 — versão simplificada
 
 Reescrita do motor com base no relatório de análise do projeto: menos conceitos para o usuário, backup incremental de verdade e o mesmo cuidado com segurança.

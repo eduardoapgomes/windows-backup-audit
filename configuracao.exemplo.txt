@@ -22,6 +22,7 @@ D:\Projetos > D_Projetos
 [EXCLUIR_PASTAS]
 # Nome de pasta (ignorada em qualquer nível) ou caminho completo. Aceita * e ?.
 # Bibliotecas e caches que podem ser reinstalados. .git NÃO é excluído de propósito.
+# site-packages = bibliotecas Python (pip) de qualquer ambiente virtual, com qualquer nome.
 node_modules
 __pycache__
 .pytest_cache
@@ -29,6 +30,7 @@ __pycache__
 .ruff_cache
 .tox
 .venv
+site-packages
 AppData
 $RECYCLE.BIN
 System Volume Information

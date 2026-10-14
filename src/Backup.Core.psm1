@@ -22,7 +22,7 @@ foreach ($parte in 'Config.ps1', 'Destino.ps1', 'Relatorio.ps1', 'Agendamento.ps
     . (Join-Path $PSScriptRoot $parte)
 }
 
-$script:Versao = '2.0.0'
+$script:Versao = '2.0.1'
 $script:MinimoMovido = 64KB      # arquivos menores são simplesmente copiados de novo
 $script:LimiteGrande = 8MB       # arquivos grandes são conferidos um por vez (evita disputa no HD)
 $script:MargemEspaco = 1GB
@@ -158,11 +158,19 @@ function Invoke-Robocopy {
         [Parameter(Mandatory)][string]$Log,
         [int]$Threads = 8,
         [long]$BytesPrevistos = 0,
-        [string]$Rotulo = ''
+        [string]$Rotulo = '',
+        # Só estes arquivos da pasta de origem, sem entrar nas subpastas (segunda passada).
+        [string[]]$Arquivos = @(),
+        # Acrescenta ao log em vez de recriá-lo.
+        [switch]$AnexarLog
     )
     $argumentos = New-Object 'Collections.Generic.List[string]'
-    foreach ($a in @($Origem, $Destino, '/E', '/COPY:DAT', '/DCOPY:DAT', '/XC', '/XN', '/XO', '/XA:O',
-            '/R:2', '/W:5', "/MT:$Threads", '/NP', '/NDL', '/FP', "/UNILOG:$Log")) { $argumentos.Add($a) }
+    $argumentos.Add($Origem); $argumentos.Add($Destino)
+    foreach ($a in $Arquivos) { $argumentos.Add($a) }
+    if (-not $Arquivos.Count) { $argumentos.Add('/E') }
+    $opcaoLog = if ($AnexarLog) { "/UNILOG+:$Log" } else { "/UNILOG:$Log" }
+    foreach ($a in @('/COPY:DAT', '/DCOPY:DAT', '/XC', '/XN', '/XO', '/XA:O',
+            '/R:2', '/W:5', "/MT:$Threads", '/NP', '/NDL', '/FP', $opcaoLog)) { $argumentos.Add($a) }
     if ($ExcluirPastas.Count) { $argumentos.Add('/XD'); foreach ($x in $ExcluirPastas) { $argumentos.Add($x) } }
     if ($ExcluirArquivos.Count) { $argumentos.Add('/XF'); foreach ($x in $ExcluirArquivos) { $argumentos.Add($x) } }
     $linha = (@($argumentos | ForEach-Object { Format-Argumento $_ })) -join ' '
@@ -191,6 +199,104 @@ function Invoke-Robocopy {
         Write-Progress -Id 1 -Activity $atividade -Completed
         $processo.Dispose()
     }
+}
+
+function Invoke-PassadaNomeCurto {
+    # O Robocopy compara /XD e /XF também com o nome curto 8.3 dos arquivos: "script.tmpl"
+    # tem o nome curto SCRIPT~1.TMP, que casa com *.tmp, e seria pulado sem aviso.
+    # A listagem marca esses itens; aqui eles são copiados à parte:
+    #   pastas: copiadas inteiras com as mesmas exclusões (a raiz da cópia não é testada);
+    #   arquivos: pelo nome, sem nenhum padrão de exclusão.
+    # Continua sem sobrescrever nada (/XC /XN /XO). Devolve o código do Robocopy (ou $null).
+    param($Ctx, [object[]]$Pendentes, [string[]]$ExcluirPastas, [string[]]$ExcluirArquivos, [int]$Threads)
+    $varredura = $Ctx.Plano.Origem
+    if (-not $Pendentes.Count -or ($varredura.PastasNomeCurto.Count + $varredura.ArquivosNomeCurto.Count) -eq 0) { return $null }
+    $sep = [IO.Path]::DirectorySeparatorChar
+    $faltam = @{}
+    foreach ($a in $Pendentes) { $faltam[$a.Relativo] = $true }
+    # Pastas: da mais rasa para a mais funda (uma pasta dentro de outra também marcada
+    # seria pulada pela cópia da de fora e é copiada depois). Só as que têm algo a copiar.
+    $passadas = New-Object 'Collections.Generic.List[object]'
+    $itens = 0
+    foreach ($rel in @($varredura.PastasNomeCurto | Sort-Object { ($_.Split($sep)).Count })) {
+        $prefixo = $rel + $sep
+        foreach ($k in $faltam.Keys) {
+            if ($k.StartsWith($prefixo, [StringComparison]::OrdinalIgnoreCase)) {
+                $passadas.Add([pscustomobject]@{ Pasta = $rel; Arquivos = @() }); $itens++; break
+            }
+        }
+    }
+    # Arquivos: agrupados por pasta, em grupos que cabem na linha de comando.
+    $porPasta = [ordered]@{}
+    foreach ($rel in $varredura.ArquivosNomeCurto) {
+        if (-not $faltam.ContainsKey($rel)) { continue }
+        $pasta = [IO.Path]::GetDirectoryName($rel)
+        if ($null -eq $pasta) { $pasta = '' }
+        if (-not $porPasta.Contains($pasta)) { $porPasta[$pasta] = New-Object 'Collections.Generic.List[string]' }
+        $porPasta[$pasta].Add([IO.Path]::GetFileName($rel))
+    }
+    foreach ($pasta in $porPasta.Keys) {
+        $grupo = New-Object 'Collections.Generic.List[string]'
+        $tamanho = 0
+        foreach ($n in $porPasta[$pasta]) {
+            if ($grupo.Count -and ($tamanho + $n.Length + 3) -gt 20000) {
+                $passadas.Add([pscustomobject]@{ Pasta = $pasta; Arquivos = $grupo.ToArray() }); $grupo.Clear(); $tamanho = 0
+            }
+            $grupo.Add($n); $tamanho += $n.Length + 3; $itens++
+        }
+        if ($grupo.Count) { $passadas.Add([pscustomobject]@{ Pasta = $pasta; Arquivos = $grupo.ToArray() }) }
+    }
+    if (-not $passadas.Count) { return $null }
+    Write-Etapa "Copiando à parte $itens item(ns) que o Robocopy pularia pelo nome curto 8.3"
+    $codigo = 0
+    foreach ($p in $passadas) {
+        $de = if ($p.Pasta) { [IO.Path]::Combine($Ctx.Origem.Caminho, $p.Pasta) } else { $Ctx.Origem.Caminho }
+        $para = if ($p.Pasta) { [IO.Path]::Combine($Ctx.PastaDestino, $p.Pasta) } else { $Ctx.PastaDestino }
+        if ($p.Arquivos.Count) {
+            $c = Invoke-Robocopy -Origem $de -Destino $para -Arquivos $p.Arquivos -Log $Ctx.Log -Threads $Threads `
+                -Rotulo "$($Ctx.Origem.Nome)\$($p.Pasta)" -AnexarLog
+        } else {
+            $c = Invoke-Robocopy -Origem $de -Destino $para -ExcluirPastas $ExcluirPastas -ExcluirArquivos $ExcluirArquivos `
+                -Log $Ctx.Log -Threads $Threads -Rotulo "$($Ctx.Origem.Nome)\$($p.Pasta)" -AnexarLog
+        }
+        $codigo = $codigo -bor $c
+    }
+    return $codigo
+}
+
+function Get-MotivoErro {
+    # Códigos de erro do Windows mais comuns no log do Robocopy, em linguagem simples.
+    param([int]$Codigo)
+    switch ($Codigo) {
+        2 { return 'o arquivo sumiu da origem durante a cópia.' }
+        3 { return 'a pasta sumiu da origem durante a cópia.' }
+        5 { return 'acesso negado (o Windows não deixou ler o arquivo).' }
+        32 { return 'o arquivo estava em uso por outro programa. Feche o programa e execute de novo.' }
+        33 { return 'parte do arquivo estava bloqueada por outro programa. Feche o programa e execute de novo.' }
+        112 { return 'o HD ficou sem espaço.' }
+        1392 { return 'arquivo corrompido ou ilegível no disco de origem.' }
+    }
+    return '{0} (erro {1} do Robocopy).' -f (New-Object ComponentModel.Win32Exception $Codigo).Message.TrimEnd('.'), $Codigo
+}
+
+function Get-FalhasRobocopy {
+    # Motivo de cada arquivo que o Robocopy não conseguiu copiar (a última tentativa vale).
+    # Linhas como "2026/10/13 20:41:56 ERRO 32 (0x00000020) Copiando Arquivo C:\pasta\arq.txt";
+    # o texto entre o código e o caminho muda com o idioma do Windows.
+    param([string]$Log, [Parameter(Mandatory)][string]$Origem)
+    $falhas = @{}
+    if (-not $Log -or -not (Test-Path -LiteralPath $Log -PathType Leaf)) { return $falhas }
+    $separador = if ($Origem.Contains('\')) { '\' } else { [string][IO.Path]::DirectorySeparatorChar }
+    $base = $Origem.TrimEnd('\', '/') + $separador
+    $padrao = '^\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2} \S+ (\d+) \(0x[0-9A-Fa-f]{8}\) .*?([A-Za-z]:\\.+|\\\\.+|/.+)$'
+    foreach ($linha in [IO.File]::ReadAllLines($Log)) {   # /UNILOG grava em UTF-16 com BOM
+        $m = [regex]::Match($linha.TrimEnd(), $padrao)
+        if (-not $m.Success) { continue }
+        $caminho = $m.Groups[2].Value
+        if (-not $caminho.StartsWith($base, [StringComparison]::OrdinalIgnoreCase)) { continue }
+        $falhas[$caminho.Substring($base.Length)] = Get-MotivoErro ([int]$m.Groups[1].Value)
+    }
+    return $falhas
 }
 
 # ------------------------------------------------------------------ verificação
@@ -265,7 +371,10 @@ function Invoke-VerificacaoArquivos {
             } else {
                 $a.Estado = 'ERRO'
                 $a.Mensagem = $r.Erro
-                Add-Detalhe $Detalhes 'ERRO' $Ctx.Origem.Nome $a.Relativo $a.Bytes '' $r.Erro
+                if ($Ctx.FalhasRobocopy -and $r.Erro -like 'Não foi copiado*' -and $Ctx.FalhasRobocopy.ContainsKey($a.Relativo)) {
+                    $a.Mensagem = 'Não foi copiado: ' + $Ctx.FalhasRobocopy[$a.Relativo]
+                }
+                Add-Detalhe $Detalhes 'ERRO' $Ctx.Origem.Nome $a.Relativo $a.Bytes '' $a.Mensagem
             }
         }
         $segundos = [math]::Max([double]1, ((Get-Date) - $inicio).TotalSeconds)
@@ -400,6 +509,7 @@ function Invoke-BackupWBA {
             $contextos.Add([pscustomobject]@{
                 Origem = $o; PastaDestino = $pastaDestino; Plano = $plano; Manifesto = $manifesto
                 CaminhoManifesto = $caminhoManifesto; UltimoSalvo = Get-Date; CodigoRobocopy = $null; Log = ''
+                FalhasRobocopy = $null
             })
             foreach ($e in $vOrigem.Erros) { Add-Detalhe $detalhes 'ERRO' $o.Nome $e[0] 0 '' $e[1] }
             foreach ($l in $vOrigem.Links) { Add-Detalhe $detalhes 'LINK_IGNORADO' $o.Nome $l 0 '' 'Atalho do sistema (junction/symlink): não é seguido.' }
@@ -567,7 +677,11 @@ function Invoke-EtapasDeGravacao {
             $ctx.CodigoRobocopy = Invoke-Robocopy -Origem $ctx.Origem.Caminho -Destino $ctx.PastaDestino `
                 -ExcluirPastas $excluirPastas -ExcluirArquivos $excluirArquivos -Log $ctx.Log -Threads $Threads `
                 -BytesPrevistos $bytesCopiar -Rotulo $nome
+            $extra = Invoke-PassadaNomeCurto -Ctx $ctx -Pendentes (@($novos) + @($alterados)) -ExcluirPastas $excluirPastas `
+                -ExcluirArquivos $excluirArquivos -Threads $Threads
+            if ($null -ne $extra) { $ctx.CodigoRobocopy = $ctx.CodigoRobocopy -bor $extra }
             if ($ctx.CodigoRobocopy -ge 8) {
+                $ctx.FalhasRobocopy = Get-FalhasRobocopy -Log $ctx.Log -Origem $ctx.Origem.Caminho
                 Write-Etapa "Robocopy terminou com código $($ctx.CodigoRobocopy): alguns arquivos falharam. Cada arquivo será conferido." Yellow
             }
             Write-Etapa "Conferindo as cópias de $nome por SHA-256"
@@ -667,6 +781,7 @@ function Invoke-VerificacaoWBA {
 
 Export-ModuleMember -Function @(
     'Invoke-BackupWBA', 'Get-ProgressoCopia', 'Invoke-VerificacaoWBA', 'Invoke-Robocopy', 'Format-Tamanho', 'Write-Etapa',
+    'Get-FalhasRobocopy', 'Get-MotivoErro',
     'Read-Configuracao', 'ConvertFrom-TextoConfig', 'Assert-Configuracao', 'Read-TextoConfig', 'New-TextoConfig',
     'Save-TextoConfig', 'Get-OrigensSugeridas', 'Get-NomePadrao', 'Test-NomeValido', 'Resolve-CaminhoLocal',
     'Test-Dentro', 'Get-IdVersaoAnterior', 'Get-InfoDisco', 'Clear-CacheDisco', 'Assert-DestinoSeguro',

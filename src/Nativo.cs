@@ -65,6 +65,11 @@ namespace WindowsBackupAudit
         public List<string> Links = new List<string>();            // relativos (junctions, symlinks)
         public List<string> PastasExcluir = new List<string>();    // completos: o Robocopy deve ignorar
         public List<string> ArquivosExcluir = new List<string>();  // completos: o Robocopy deve ignorar
+        // Itens que o Robocopy pularia por engano: o nome longo não casa com nenhuma exclusão,
+        // mas o nome curto 8.3 casa (ex.: "script.tmpl" tem o nome curto SCRIPT~1.TMP, que
+        // casa com *.tmp). São copiados numa segunda passada. Relativos.
+        public List<string> PastasNomeCurto = new List<string>();
+        public List<string> ArquivosNomeCurto = new List<string>();
         public List<string[]> Erros = new List<string[]>();        // { relativo, mensagem }
         public long Bytes;
         public long Pastas;
@@ -165,6 +170,108 @@ namespace WindowsBackupAudit
         {
             return Algum(arquivosPorNome, nome) || Algum(arquivosPorCaminho, completo);
         }
+
+        /// <summary>Só os padrões sem barra (usados para testar o nome curto 8.3).</summary>
+        public bool ExcluiPastaPeloNome(string nome) { return Algum(pastasPorNome, nome); }
+        public bool ExcluiArquivoPeloNome(string nome) { return Algum(arquivosPorNome, nome); }
+    }
+
+    /// <summary>
+    /// Cuidados com a sessão durante execuções longas: não deixar o Windows entrar em
+    /// suspensão e não deixar um clique na janela pausar o programa.
+    /// </summary>
+    public static class Sessao
+    {
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        private struct REASON_CONTEXT
+        {
+            public uint Version;
+            public uint Flags;
+            [MarshalAs(UnmanagedType.LPWStr)] public string SimpleReasonString;
+        }
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern IntPtr PowerCreateRequest(ref REASON_CONTEXT contexto);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool PowerSetRequest(IntPtr h, int tipo);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool PowerClearRequest(IntPtr h, int tipo);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool CloseHandle(IntPtr h);
+        [DllImport("kernel32.dll")]
+        private static extern IntPtr GetStdHandle(int qual);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool GetConsoleMode(IntPtr h, out uint modo);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool SetConsoleMode(IntPtr h, uint modo);
+
+        private const int SISTEMA_NECESSARIO = 1;      // PowerRequestSystemRequired
+        private const uint EDICAO_RAPIDA = 0x40;       // ENABLE_QUICK_EDIT_MODE
+        private const uint FLAGS_ESTENDIDOS = 0x80;    // ENABLE_EXTENDED_FLAGS
+        private static IntPtr pedido = IntPtr.Zero;
+        private static uint modoOriginal;
+        private static bool modoAlterado;
+
+        /// <summary>
+        /// Pede ao Windows para não suspender o computador (a tela ainda pode apagar).
+        /// Aparece em "powercfg /requests". Vale até Liberar() ou até o processo terminar.
+        /// </summary>
+        public static bool ManterAcordado(string motivo)
+        {
+            if (!Nativo.Windows) return false;
+            if (pedido != IntPtr.Zero) return true;
+            try
+            {
+                REASON_CONTEXT c = new REASON_CONTEXT();
+                c.Version = 0;                     // POWER_REQUEST_CONTEXT_VERSION
+                c.Flags = 1;                       // POWER_REQUEST_CONTEXT_SIMPLE_STRING
+                c.SimpleReasonString = motivo;
+                IntPtr h = PowerCreateRequest(ref c);
+                if (h == IntPtr.Zero || h == new IntPtr(-1)) return false;
+                if (!PowerSetRequest(h, SISTEMA_NECESSARIO)) { CloseHandle(h); return false; }
+                pedido = h;
+                return true;
+            }
+            catch (Exception) { return false; }
+        }
+
+        public static void Liberar()
+        {
+            if (pedido == IntPtr.Zero) return;
+            try { PowerClearRequest(pedido, SISTEMA_NECESSARIO); CloseHandle(pedido); }
+            catch (Exception) { }
+            pedido = IntPtr.Zero;
+        }
+
+        /// <summary>
+        /// Desliga a "Edição Rápida" do console. Com ela ligada, um clique dentro da janela
+        /// entra no modo de seleção e PAUSA o programa até alguém apertar uma tecla.
+        /// </summary>
+        public static bool DesligarEdicaoRapida()
+        {
+            if (!Nativo.Windows) return false;
+            if (modoAlterado) return true;
+            try
+            {
+                IntPtr h = GetStdHandle(-10);      // STD_INPUT_HANDLE
+                uint modo;
+                if (h == IntPtr.Zero || h == new IntPtr(-1) || !GetConsoleMode(h, out modo)) return false;
+                if ((modo & EDICAO_RAPIDA) == 0) return false;
+                if (!SetConsoleMode(h, (modo & ~EDICAO_RAPIDA) | FLAGS_ESTENDIDOS)) return false;
+                modoOriginal = modo;
+                modoAlterado = true;
+                return true;
+            }
+            catch (Exception) { return false; }
+        }
+
+        public static void RestaurarConsole()
+        {
+            if (!modoAlterado) return;
+            try { SetConsoleMode(GetStdHandle(-10), modoOriginal); }
+            catch (Exception) { }
+            modoAlterado = false;
+        }
     }
 
     public static class Nativo
@@ -225,8 +332,23 @@ namespace WindowsBackupAudit
         private static extern bool CreateDirectoryW(string nome, IntPtr seg);
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         private static extern bool MoveFileExW(string de, string para, uint opcoes);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool ReadFile(SafeFileHandle h, IntPtr buffer, uint quantos, out uint lidos, IntPtr sobreposto);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern IntPtr VirtualAlloc(IntPtr endereco, UIntPtr tamanho, uint tipo, uint protecao);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool VirtualFree(IntPtr endereco, UIntPtr tamanho, uint tipo);
 
         private static readonly IntPtr INVALIDO = new IntPtr(-1);
+        private const int BLOCO = 1 << 20;
+
+        // Um buffer de leitura por thread: evita alocar 1 MB para cada arquivo pequeno.
+        [ThreadStatic] private static byte[] bufferDaThread;
+        private static byte[] BufferDaThread()
+        {
+            if (bufferDaThread == null) bufferDaThread = new byte[BLOCO];
+            return bufferDaThread;
+        }
 
         /// <summary>Prefixo \\?\ para a API Win32 aceitar caminhos longos.</summary>
         public static string Longo(string caminho)
@@ -270,9 +392,10 @@ namespace WindowsBackupAudit
             public long Bytes;
             public long Modificado;
             public uint Tag;
+            public string Curto;     // nome 8.3 (vazio se não houver ou se não foi pedido)
         }
 
-        private static List<Entrada> Listar(string pasta)
+        private static List<Entrada> Listar(string pasta, bool comNomeCurto)
         {
             List<Entrada> lista = new List<Entrada>();
             if (!Windows)
@@ -292,8 +415,9 @@ namespace WindowsBackupAudit
                 return lista;
             }
             WIN32_FIND_DATAW d;
-            // 1 = FindExInfoBasic (sem nome curto), 2 = FIND_FIRST_EX_LARGE_FETCH
-            IntPtr h = FindFirstFileExW(Longo(pasta) + @"\*", 1, out d, 0, IntPtr.Zero, 2);
+            // Nível 0 = FindExInfoStandard (com o nome curto 8.3), 1 = FindExInfoBasic (sem).
+            // Opção 2 = FIND_FIRST_EX_LARGE_FETCH.
+            IntPtr h = FindFirstFileExW(Longo(pasta) + @"\*", comNomeCurto ? 0 : 1, out d, 0, IntPtr.Zero, 2);
             if (h == INVALIDO)
             {
                 int erro = Marshal.GetLastWin32Error();
@@ -311,6 +435,9 @@ namespace WindowsBackupAudit
                     e.Bytes = ((long)d.nFileSizeHigh << 32) | d.nFileSizeLow;
                     e.Modificado = Ticks(d.ftLastWriteTime);
                     e.Tag = (d.dwFileAttributes & REPARSE) != 0 ? d.dwReserved0 : 0;
+                    if (comNomeCurto && !string.IsNullOrEmpty(d.cAlternateFileName) &&
+                        !string.Equals(d.cAlternateFileName, d.cFileName, StringComparison.OrdinalIgnoreCase))
+                        e.Curto = d.cAlternateFileName;
                     lista.Add(e);
                 } while (FindNextFileW(h, out d));
                 int fim = Marshal.GetLastWin32Error();
@@ -342,7 +469,7 @@ namespace WindowsBackupAudit
                 string rel = pilha.Pop();
                 string pasta = rel.Length == 0 ? raiz : raiz + Sep + rel;
                 List<Entrada> itens;
-                try { itens = Listar(pasta); }
+                try { itens = Listar(pasta, ehOrigem); }
                 catch (Exception ex)
                 {
                     v.Erros.Add(new string[] { rel.Length == 0 ? "." : rel, "Não foi possível ler a pasta: " + Mensagem(ex) });
@@ -362,6 +489,12 @@ namespace WindowsBackupAudit
                         v.Links.Add(relItem);
                         if (ehPasta) v.PastasExcluir.Add(completo); else v.ArquivosExcluir.Add(completo);
                         continue;
+                    }
+                    // O Robocopy também compara /XD e /XF com o nome curto 8.3. Se só o nome
+                    // curto casa com uma exclusão, o item é copiado numa segunda passada.
+                    if (e.Curto != null && (ehPasta ? filtro.ExcluiPastaPeloNome(e.Curto) : filtro.ExcluiArquivoPeloNome(e.Curto)))
+                    {
+                        if (ehPasta) v.PastasNomeCurto.Add(relItem); else v.ArquivosNomeCurto.Add(relItem);
                     }
                     if (ehPasta) { pilha.Push(relItem); continue; }
                     Arquivo a = new Arquivo();
@@ -553,11 +686,64 @@ namespace WindowsBackupAudit
             using (Stream s = AbrirLeitura(caminho))
             using (HashAlgorithm sha = NovoSha256())
             {
-                byte[] buffer = new byte[1 << 20];
+                byte[] buffer = BufferDaThread();
                 int lidos;
                 while ((lidos = s.Read(buffer, 0, buffer.Length)) > 0) sha.TransformBlock(buffer, 0, lidos, null, 0);
                 sha.TransformFinalBlock(buffer, 0, 0);
                 return Hex(sha.Hash);
+            }
+        }
+
+        /// <summary>
+        /// SHA-256 lido do próprio disco, sem passar pelo cache do Windows
+        /// (FILE_FLAG_NO_BUFFERING). Logo depois da cópia o conteúdo ainda está na
+        /// memória; ler de lá confirmaria a memória, não o que foi gravado no HD.
+        /// Se o disco recusar a leitura sem cache, lê do jeito normal.
+        /// </summary>
+        public static string Sha256DoDisco(string caminho)
+        {
+            if (!Windows) return Sha256(caminho);
+            // GENERIC_READ, compartilhamento só de leitura, OPEN_EXISTING,
+            // FILE_FLAG_NO_BUFFERING | FILE_FLAG_SEQUENTIAL_SCAN.
+            SafeFileHandle h = CreateFileW(Longo(caminho), 0x80000000, 1, IntPtr.Zero, 3, 0x20000000 | 0x08000000, IntPtr.Zero);
+            if (h.IsInvalid)
+            {
+                int erro = Marshal.GetLastWin32Error();
+                h.Dispose();
+                if (erro == 87) return Sha256(caminho);
+                throw new Win32Exception(erro);
+            }
+            IntPtr alinhado = IntPtr.Zero;
+            try
+            {
+                // Sem cache, o buffer precisa estar alinhado ao setor do disco e cada leitura
+                // pedir um múltiplo do setor: VirtualAlloc devolve memória alinhada a 64 KB.
+                alinhado = VirtualAlloc(IntPtr.Zero, new UIntPtr((uint)BLOCO), 0x3000, 0x04);   // MEM_COMMIT|MEM_RESERVE, PAGE_READWRITE
+                if (alinhado == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error());
+                using (HashAlgorithm sha = NovoSha256())
+                {
+                    byte[] buffer = BufferDaThread();
+                    while (true)
+                    {
+                        uint lidos;
+                        if (!ReadFile(h, alinhado, (uint)BLOCO, out lidos, IntPtr.Zero))
+                        {
+                            int erro = Marshal.GetLastWin32Error();
+                            if (erro == 87) return Sha256(caminho);   // alinhamento recusado pelo disco
+                            throw new Win32Exception(erro);
+                        }
+                        if (lidos == 0) break;
+                        Marshal.Copy(alinhado, buffer, 0, (int)lidos);
+                        sha.TransformBlock(buffer, 0, (int)lidos, null, 0);
+                    }
+                    sha.TransformFinalBlock(buffer, 0, 0);
+                    return Hex(sha.Hash);
+                }
+            }
+            finally
+            {
+                if (alinhado != IntPtr.Zero) VirtualFree(alinhado, UIntPtr.Zero, 0x8000);   // MEM_RELEASE
+                h.Dispose();
             }
         }
 
@@ -591,7 +777,7 @@ namespace WindowsBackupAudit
                 if (a1.Modificado != b.Modificado) { r.Erro = "Data de modificação diferente no destino. O arquivo pode ter mudado durante a cópia."; r.ConteudoDiferente = true; return r; }
                 Task<string> tarefa = Task.Factory.StartNew<string>(delegate { return Sha256(origem); }, TaskCreationOptions.LongRunning);
                 string hDestino;
-                try { hDestino = Sha256(destino); }
+                try { hDestino = Sha256DoDisco(destino); }
                 finally { try { tarefa.Wait(); } catch (Exception) { } }
                 string hOrigem = tarefa.Result;
                 Estado a2 = Info(origem);
@@ -625,7 +811,7 @@ namespace WindowsBackupAudit
                 Estado e = Info(caminho);
                 if (e == null || e.Pasta) { r.Erro = "Arquivo ausente no backup."; return r; }
                 if (e.Bytes != bytes) { r.Erro = "Tamanho diferente do registrado."; r.ConteudoDiferente = true; return r; }
-                r.HashDestino = Sha256(caminho);
+                r.HashDestino = Sha256DoDisco(caminho);
                 r.Bytes = e.Bytes;
                 r.Modificado = e.Modificado;
                 if (!string.Equals(r.HashDestino, sha, StringComparison.OrdinalIgnoreCase))

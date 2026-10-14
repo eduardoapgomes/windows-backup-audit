@@ -80,7 +80,20 @@ Escolha **toda semana** ou **todo dia** e o horário. O Windows executa o backup
 
 **“Só na nuvem” no relatório.** No Explorador, clique com o botão direito na pasta do OneDrive › **Sempre manter neste dispositivo**, espere o download terminar e faça o backup de novo. O programa não baixa arquivos da nuvem sozinho para não encher o disco do computador.
 
-**“Arquivo em uso por outro programa”.** Feche o programa (Outlook, por exemplo, mantém o `.pst` aberto) e execute de novo.
+**“Arquivo em uso por outro programa”.** Feche o programa (Outlook, por exemplo, mantém o `.pst` aberto) e execute de novo. Um arquivo oculto com nome de código na raiz do OneDrive (`.849C9593-…`) é do próprio OneDrive e fica sempre aberto: coloque o nome dele em `[EXCLUIR_ARQUIVOS]`.
+
+**O programa parece parado e o título da janela começa com “Selecionar”.** Um clique dentro da janela preta entra no modo de seleção, e o Windows pausa o programa até você apertar **Esc**. Desde a versão 2.0.1 isso fica desligado enquanto o backup roda, e o computador também não entra em suspensão no meio.
+
+**Projetos Python: as bibliotecas não entram no backup.** A pasta `site-packages` (o que o `pip` instala em qualquer ambiente virtual, tenha ele o nome que tiver) é excluída por padrão: são dezenas de milhares de arquivos que podem ser reinstalados. Para guardar a lista de pacotes de cada ambiente antes do backup, rode no PowerShell (troque `C:\Dados` pela sua pasta):
+
+```powershell
+Get-ChildItem C:\Dados -Recurse -Filter pyvenv.cfg -File -ErrorAction SilentlyContinue | ForEach-Object {
+    $py = Join-Path $_.DirectoryName 'Scripts\python.exe'
+    if (Test-Path $py) { & $py -m pip freeze | Set-Content (Join-Path $_.DirectoryName 'requirements-backup.txt') }
+}
+```
+
+Para recriar um ambiente depois: `python -m venv novo-venv` e `novo-venv\Scripts\python -m pip install -r venv\requirements-backup.txt`.
 
 **“Não foi possível ler a pasta: Acesso negado”.** É uma pasta protegida pelo Windows ou por outro usuário. Se você não precisa dela, coloque o caminho completo em `[EXCLUIR_PASTAS]`.
 

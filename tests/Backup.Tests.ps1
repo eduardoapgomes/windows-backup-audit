@@ -29,6 +29,14 @@ BeforeAll {
     function Invoke-Teste($Cenario, [string]$Modo = 'Backup') {
         Invoke-BackupWBA -Config $Cenario.Config -Destino $Cenario.Destino -Modo $Modo -Threads 4 -PastaSimulacao (Join-Path $Cenario.Raiz 'sim')
     }
+    function Set-NomeCurto([string]$Caminho, [string]$Curto) {
+        # Devolve o nome curto 8.3 do item; se o Windows não gerou um, tenta definir com fsutil.
+        $fso = New-Object -ComObject Scripting.FileSystemObject
+        $ler = { if (Test-Path -LiteralPath $Caminho -PathType Container) { $fso.GetFolder($Caminho).ShortName } else { $fso.GetFile($Caminho).ShortName } }
+        $nome = & $ler
+        if ($nome -notlike '*~*') { $null = & fsutil.exe file setshortname $Caminho $Curto 2>&1; $nome = & $ler }
+        return $nome
+    }
     function Get-Soma($Resumo, [string]$Campo) { return [int](($Resumo.Origens | Measure-Object -Property $Campo -Sum).Sum) }
     function Set-ConteudoMesmaData([string]$Caminho, [byte[]]$Bytes) {
         $data = (Get-Item -LiteralPath $Caminho).LastWriteTimeUtc
@@ -202,11 +210,54 @@ Describe 'Backup de ponta a ponta' {
             $r.Situacao | Should -Be 'ERROS'
             $r.CodigoSaida | Should -Be 2
             Get-Soma $r 'Copiados' | Should -Be 6
+            # O motivo vem do log do Robocopy (erro 32).
+            $d = Import-Csv -LiteralPath (Join-Path (Split-Path $r.Relatorio) 'detalhes.tsv') -Delimiter "`t"
+            @($d | Where-Object situacao -eq 'ERRO')[0].mensagem | Should -Match 'em uso'
         } finally { $trava.Dispose() }
         $r = Invoke-Teste $c
         $r.Situacao | Should -Be 'OK'
         Get-Soma $r 'Copiados' | Should -Be 1
     }
+
+    It 'copia o que o Robocopy pularia pelo nome curto 8.3' {
+        # script.tmpl tem o nome curto SCRIPT~1.TMP, que casa com *.tmp no Robocopy.
+        $raiz = Join-Path $TestDrive ('n83-' + [guid]::NewGuid().ToString('N').Substring(0, 6))
+        $origem = Join-Path $raiz 'Origem'
+        $destino = Join-Path $raiz 'HD\BACKUP_WINDOWS\PC'
+        $pasta = Join-Path $origem 'Pasta Com Nome Longo'
+        New-Item -ItemType Directory -Force (Join-Path $origem 'lib'), $pasta | Out-Null
+        $tmpl = Join-Path $origem 'lib\script.tmpl'
+        [IO.File]::WriteAllText($tmpl, 'modelo')
+        [IO.File]::WriteAllText((Join-Path $origem 'lib\lixo.tmp'), 'temporario')
+        [IO.File]::WriteAllText((Join-Path $pasta 'dentro.txt'), 'dentro')
+        [IO.File]::WriteAllText((Join-Path $pasta 'outro.tmpl'), 'outro')
+        $curtoArquivo = Set-NomeCurto $tmpl 'SCRIPT~1.TMP'
+        $curtoPasta = Set-NomeCurto $pasta 'PASTAC~1'
+        $null = Set-NomeCurto (Join-Path $pasta 'outro.tmpl') 'OUTRO~1.TMP'
+        if ($curtoArquivo -notlike '*~*' -or $curtoPasta -notlike '*~*') {
+            Set-ItResult -Skipped -Because 'este volume não gera nomes curtos 8.3'
+            return
+        }
+        # Um padrão que só casa com o nome curto da pasta (PASTAC~1), não com o longo.
+        $texto = New-TextoConfig -Destino $destino -Origens @([pscustomobject]@{ Caminho = $origem; Nome = 'Origem' }) `
+            -ExcluirPastas @('node_modules', '*~1')
+        $config = ConvertFrom-TextoConfig $texto -Arquivo 'teste'
+        $v = [WindowsBackupAudit.Nativo]::Varrer($origem, [WindowsBackupAudit.Filtro]::new([string[]]$config.ExcluirPastas, [string[]]$config.ExcluirArquivos), $true)
+        $v.ArquivosNomeCurto | Should -Contain 'lib\script.tmpl'
+        $v.PastasNomeCurto | Should -Contain 'Pasta Com Nome Longo'
+        $r = Invoke-BackupWBA -Config $config -Destino $destino -Modo Backup -Threads 4
+        $r.Situacao | Should -Be 'OK'
+        Get-Soma $r 'Copiados' | Should -Be 3
+        $copia = Join-Path $destino 'Origem'
+        [IO.File]::ReadAllText((Join-Path $copia 'lib\script.tmpl')) | Should -Be 'modelo'
+        [IO.File]::ReadAllText((Join-Path $copia 'Pasta Com Nome Longo\dentro.txt')) | Should -Be 'dentro'
+        [IO.File]::ReadAllText((Join-Path $copia 'Pasta Com Nome Longo\outro.tmpl')) | Should -Be 'outro'
+        Test-Path -LiteralPath (Join-Path $copia 'lib\lixo.tmp') | Should -BeFalse
+        # A segunda execução não copia nada.
+        $r = Invoke-BackupWBA -Config $config -Destino $destino -Modo Backup -Threads 4
+        $r.Situacao | Should -Be 'OK'
+        Get-Soma $r 'Copiados' | Should -Be 0
+    } -Skip:([Environment]::OSVersion.Platform -ne 'Win32NT')
 
     It 'caminhos com mais de 260 caracteres' {
         $c = New-Cenario
@@ -286,11 +337,48 @@ Describe 'Motor nativo' {
         [WindowsBackupAudit.Nativo]::EhLink([uint32]0x80000017L) | Should -BeFalse   # WOF (arquivo comprimido)
         [WindowsBackupAudit.Nativo]::EhLink([uint32]0x9000001AL) | Should -BeFalse   # OneDrive
     }
+    It 'lê o arquivo do disco, sem cache, com o mesmo SHA-256' {
+        foreach ($tamanho in 0, 1, 4095, 4096, (1MB + 5), (3MB + 1)) {
+            $p = Join-Path $TestDrive "disco-$tamanho.bin"
+            $b = New-Object byte[] $tamanho
+            (New-Object Random $tamanho).NextBytes($b)
+            [IO.File]::WriteAllBytes($p, $b)
+            [WindowsBackupAudit.Nativo]::Sha256DoDisco($p) | Should -Be (Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash.ToLowerInvariant()
+        }
+    }
+    It 'mantém o computador acordado e devolve tudo no fim' {
+        if ([Environment]::OSVersion.Platform -eq 'Win32NT') { [WindowsBackupAudit.Sessao]::ManterAcordado('teste') | Should -BeTrue }
+        { [WindowsBackupAudit.Sessao]::DesligarEdicaoRapida() } | Should -Not -Throw
+        { [WindowsBackupAudit.Sessao]::Liberar(); [WindowsBackupAudit.Sessao]::Liberar() } | Should -Not -Throw
+        { [WindowsBackupAudit.Sessao]::RestaurarConsole() } | Should -Not -Throw
+    }
     It 'calcula SHA-256 igual ao Get-FileHash' {
         $p = Join-Path $TestDrive 'hash.bin'
         $b = New-Object byte[] (3MB + 17)
         (New-Object Random 3).NextBytes($b)
         [IO.File]::WriteAllBytes($p, $b)
         [WindowsBackupAudit.Nativo]::Sha256($p) | Should -Be (Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash.ToLowerInvariant()
+    }
+}
+
+Describe 'Log do Robocopy' {
+    It 'extrai o motivo de cada falha (última tentativa, qualquer idioma)' {
+        $log = Join-Path $TestDrive 'robocopy-teste.log'
+        $linhas = @(
+            '  Iniciado: terça-feira, 13 de outubro de 2026 20:31:16',
+            '2026/10/13 20:31:16 ERRO 32 (0x00000020) Copiando Arquivo C:\Users\Ana\OneDrive\.849C9593-D756',
+            'O arquivo já está sendo usado por outro processo.',
+            '2026/10/13 20:41:56 ERRO 5 (0x00000005) Copiando Arquivo C:\Users\Ana\OneDrive\Pasta\a b.txt',
+            '2026/10/13 20:41:57 ERROR 32 (0x00000020) Copying File C:\Users\Ana\OneDrive\Pasta\a b.txt',
+            '2026/10/13 20:41:58 ERRO 3 (0x00000003) Criando Pasta de Destino D:\BACKUP\OneDrive\x\',
+            '2026/10/13 20:41:59 ERRO 1117 (0x0000045D) Copiando Arquivo C:\Users\Ana\OneDrive\ruim.bin',
+            '	  Novo Arquivo		     504	C:\Users\Ana\OneDrive\ok.txt')
+        [IO.File]::WriteAllLines($log, [string[]]$linhas, [Text.Encoding]::Unicode)
+        $f = Get-FalhasRobocopy -Log $log -Origem 'C:\Users\Ana\OneDrive\'
+        $f.Count | Should -Be 3
+        $f['.849C9593-D756'] | Should -Match 'em uso'
+        $f['Pasta\a b.txt'] | Should -Match 'em uso'
+        $f['ruim.bin'] | Should -Match '1117'
+        (Get-FalhasRobocopy -Log (Join-Path $TestDrive 'nao-existe.log') -Origem 'C:\x').Count | Should -Be 0
     }
 }

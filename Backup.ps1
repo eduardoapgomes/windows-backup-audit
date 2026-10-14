@@ -72,6 +72,12 @@ try {
         $destino = Resolve-Destino -Configurado $cfg.Destino -Origens $origens -Automatico:$Automatico
         if ($destino -ne $cfg.Destino) { Write-Etapa "O HD de backup foi encontrado em $($destino.Substring(0, 2))" Cyan }
         $resumo = $null
+        if ($Acao -eq 'Backup' -or $Acao -eq 'Verificar') {
+            # Execução longa: o Windows não deve suspender no meio, e um clique na janela
+            # não deve pausar o programa (Edição Rápida do console). Desfeito no final.
+            [void][WindowsBackupAudit.Sessao]::ManterAcordado('Windows Backup Audit: backup em andamento')
+            [void][WindowsBackupAudit.Sessao]::DesligarEdicaoRapida()
+        }
         switch ($Acao) {
             'Relatorio' { Open-UltimoRelatorio $destino; $codigo = 0 }
             'Verificar' {
@@ -108,6 +114,10 @@ try {
     Write-Host "NÃO EXECUTADO: $motivo" -ForegroundColor Red
     $codigo = 3
 } finally {
+    if ('WindowsBackupAudit.Sessao' -as [type]) {
+        [WindowsBackupAudit.Sessao]::Liberar()
+        [WindowsBackupAudit.Sessao]::RestaurarConsole()
+    }
     if ($transcricao) { try { Stop-Transcript | Out-Null } catch { Write-Verbose 'transcrição já encerrada' } }
 }
 

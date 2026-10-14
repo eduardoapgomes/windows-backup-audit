@@ -61,14 +61,14 @@ Arquivos apagados no computador **continuam no HD**. Registros do manifesto cujo
 O que mais custava tempo na versão 1 era, para **cada arquivo**: consultar o Windows sobre a identidade dos discos (várias chamadas `Get-Disk`/`Get-Partition`), percorrer os ancestrais do caminho, iniciar um processo do Robocopy, ler o arquivo quatro vezes (SHA-256 antes, em área temporária, de novo na origem e no destino) e reabrir o CSV. A versão 2:
 
 1. **Consulta os discos uma vez por execução** (e de novo só antes de etapas que gravam).
-2. **Lista pastas com `FindFirstFileExW`** (`FIND_FIRST_EX_LARGE_FETCH`), que devolve nome, tamanho, data e atributos em lote, sem abrir arquivos. Funciona com caminhos de mais de 260 caracteres (prefixo `\\?\`).
+2. **Lista pastas com `FindFirstFileExW`** (`FIND_FIRST_EX_LARGE_FETCH`), que devolve nome, tamanho, data e atributos em lote, sem abrir arquivos (na origem, também o nome curto 8.3). Funciona com caminhos de mais de 260 caracteres (prefixo `\\?\`).
 3. **Compara em memória** (dicionários em C#), sem laço lento em PowerShell.
 4. **Não lê o que não mudou**: o manifesto guarda tamanho, data e SHA-256 de cada arquivo já conferido.
 5. **Um Robocopy multithread por pasta de origem** (`/MT:8`, ajustável com `-Threads`).
 6. **Lê cada arquivo copiado uma vez na origem e uma no HD, ao mesmo tempo** (discos diferentes trabalham em paralelo). Arquivos pequenos são conferidos em lotes de 64, quatro por vez; grandes, um por vez para não disputar o HD.
 7. **SHA-256 da criptografia do Windows (CNG)**, que usa as instruções SHA da CPU quando existem. No .NET Framework, o `SHA256.Create()` padrão é a implementação gerenciada, várias vezes mais lenta.
 8. **Pasta renomeada é movida dentro do HD**, sem copiar gigabytes de novo.
-9. **Exclusões por nome** (`node_modules`, `__pycache__`, `.venv`…) cortam a árvore inteira na listagem e no Robocopy.
+9. **Exclusões por nome** (`node_modules`, `__pycache__`, `.venv`, `site-packages`…) cortam a árvore inteira na listagem e no Robocopy. Em um computador real, os ambientes virtuais Python eram 94% dos arquivos de uma pasta de projetos (214 mil de 228 mil).
 
 Resultado medido no CI (`tests\Comparar-Desempenho.ps1`, 1.504 arquivos e 112 MB): primeiro backup **6,7 s** (versão 1: 131 s), execução sem mudanças **0,1 s** (55 s), 10 arquivos alterados **0,3 s** (56 s). Na versão 1 a checagem de disco por arquivo foi simulada, então o custo real dela era ainda maior.
 
@@ -77,6 +77,9 @@ Resultado medido no CI (`tests\Comparar-Desempenho.ps1`, 1.504 arquivos e 112 MB
 - **O Robocopy nunca sobrescreve**: `/XC /XN /XO` excluem arquivos “alterados”, “mais novos” e “mais antigos” — ou seja, ele só cria arquivos que **não existem** no destino. Quem decide atualizar é o programa, que antes move a versão antiga para `_VERSOES_ANTERIORES`. Mover nunca substitui um arquivo existente (`MoveFileEx` sem `REPLACE_EXISTING`).
 - **Nada é apagado**: não há `/MIR`, `/PURGE` nem exclusão de arquivos, na origem ou no HD.
 - **Conferência real**: o arquivo só entra no manifesto depois que o SHA-256 lido na origem e no HD coincidem, o tamanho e a data são iguais e a origem não mudou durante a leitura. A origem é aberta só com compartilhamento de leitura: ninguém grava nela enquanto é lida.
+- **A cópia é lida do disco, não da memória**: logo depois de copiado, o conteúdo ainda está no cache do Windows, e lê-lo de lá confirmaria a memória, não o HD. Por isso a cópia é lida com `FILE_FLAG_NO_BUFFERING` (buffer alinhado ao setor); se o disco recusar esse modo, a leitura volta ao normal. Vale também para **Verificar integridade**.
+- **Nome curto 8.3**: o Robocopy compara `/XD` e `/XF` também com o nome curto dos arquivos — `script.tmpl` tem o nome curto `SCRIPT~1.TMP`, que casa com `*.tmp`, e seria pulado. A listagem da origem lê o nome curto; o que só seria excluído por ele é copiado numa segunda passada, sem padrões de exclusão, e conferido como os demais.
+- **Execuções longas não param sozinhas**: durante o backup e a verificação, o programa pede ao Windows para não suspender o computador (aparece em `powercfg /requests`; a tela ainda pode apagar) e desliga a *Edição Rápida* do console — com ela ligada, um clique dentro da janela entra no modo de seleção e pausa o programa até alguém apertar uma tecla. As duas coisas são desfeitas no fim.
 - **Manifesto à prova de interrupção**: é gravado em um arquivo temporário e trocado de uma vez; a última linha tem o SHA-256 de todas as anteriores. Se o arquivo estiver truncado, editado ou corrompido, é ignorado — e os arquivos são conferidos de novo (mais lento, nunca inseguro).
 - **Retomada**: o manifesto é salvo a cada minuto durante a conferência. Depois de uma queda de energia, o que já foi conferido não é lido de novo; um arquivo copiado pela metade tem tamanho ou data diferentes, vai para `_VERSOES_ANTERIORES` e é copiado de novo.
 - **O HD certo**: antes de mover ou copiar, a identidade do disco é conferida de novo. Uma trava (`.backup.lock`, aberta sem compartilhamento) impede duas execuções no mesmo HD.
@@ -103,7 +106,9 @@ robocopy "<origem>" "<HD>\<Nome>" /E /COPY:DAT /DCOPY:DAT /XC /XN /XO /XA:O /R:2
 
 Não são usados: `/MIR` e `/PURGE` (apagam no destino), `/Z` (modo reiniciável, bem mais lento — a retomada é feita pelo manifesto), `/B` (exige administrador), `/XJ` (pastas do OneDrive também são pontos de reparse e poderiam ser puladas; por isso os links verdadeiros são identificados pelo programa e excluídos um a um).
 
-O código de saída do Robocopy não é usado para decidir sucesso: **cada arquivo é conferido** depois.
+Se a listagem encontrou itens que o Robocopy pularia pelo nome curto 8.3, uma segunda passada copia só eles (`robocopy <pasta> <HD> <arquivo> ...`, sem `/XF`), acrescentando ao mesmo log (`/UNILOG+`).
+
+O código de saída do Robocopy não é usado para decidir sucesso: **cada arquivo é conferido** depois. Quando há falhas, o motivo de cada arquivo é lido das linhas `ERRO` do log (por exemplo, erro 32: arquivo em uso) e aparece no relatório.
 
 ## Manifesto
 
@@ -122,7 +127,7 @@ Fotos\2023\praia.jpg	4821337	133401234567890000	9f86d081884c7d65…	2026-10-13T1
 
 Mesma semântica do Robocopy: um padrão **sem barra** vale para o nome da pasta ou do arquivo em qualquer nível (`node_modules`, `*.tmp`); **com barra** compara com o caminho completo (`D:\Projetos\Grande`). Aceitam `*` e `?`. Pastas excluídas não são percorridas.
 
-Padrões: `node_modules`, `__pycache__`, `.pytest_cache`, `.mypy_cache`, `.ruff_cache`, `.tox`, `.venv`, `AppData`, `$RECYCLE.BIN`, `System Volume Information`; arquivos `~$*`, `*.tmp`, `Thumbs.db`, `*.crdownload`, `*.part`, `*.partial`. **`.git` não é excluído** (commits locais, branches e stashes não enviados são dados seus) e **`*.log` também não** (logs de experimentos podem ser dados).
+Padrões: `node_modules`, `__pycache__`, `.pytest_cache`, `.mypy_cache`, `.ruff_cache`, `.tox`, `.venv`, `site-packages`, `AppData`, `$RECYCLE.BIN`, `System Volume Information`; arquivos `~$*`, `*.tmp`, `Thumbs.db`, `*.crdownload`, `*.part`, `*.partial`. **`.git` não é excluído** (commits locais, branches e stashes não enviados são dados seus) e **`*.log` também não** (logs de experimentos podem ser dados).
 
 ## Decisões a partir do relatório de pesquisa
 

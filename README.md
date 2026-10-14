@@ -101,7 +101,7 @@ O menu e o `Backup.ps1` terminam com um código: **0** tudo certo · **1** aviso
 - Arquivo com mesmo tamanho e data já registrado no manifesto **não é lido de novo**.
 - O **Robocopy multithread** (`/MT:8`) copia; nada de um processo por arquivo.
 - SHA-256 pela criptografia do Windows (usa as instruções SHA da CPU quando existem), lendo **origem e HD ao mesmo tempo**; arquivos pequenos são conferidos em paralelo.
-- Bibliotecas e caches regeneráveis (`node_modules`, `__pycache__`, `.venv`…) ficam fora por padrão. `.git` **não** é excluído: o histórico local de um repositório é dado seu.
+- Bibliotecas e caches regeneráveis (`node_modules`, `__pycache__`, `.venv`, `site-packages`…) ficam fora por padrão. `.git` **não** é excluído: o histórico local de um repositório é dado seu.
 
 Medição no Windows do CI (1.504 arquivos, 112 MB, mesmo SSD; a checagem física do HD foi simulada nas duas versões, o que favorece a versão 1):
 

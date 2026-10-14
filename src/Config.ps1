@@ -12,9 +12,11 @@ $script:SecoesValidas = @('DESTINO', 'ORIGENS', 'EXCLUIR_PASTAS', 'EXCLUIR_ARQUI
 
 # Pastas regeneráveis ou do sistema. NÃO inclui .git: o histórico local de um
 # repositório (commits ainda não enviados, stashes) é dado do usuário.
+# site-packages: bibliotecas instaladas pelo pip em qualquer ambiente Python (venv, conda),
+# com qualquer nome de pasta; costumam ser dezenas de milhares de arquivos pequenos.
 $script:ExcluirPastasPadrao = @(
     'node_modules', '__pycache__', '.pytest_cache', '.mypy_cache', '.ruff_cache', '.tox', '.venv',
-    'AppData', '$RECYCLE.BIN', 'System Volume Information')
+    'site-packages', 'AppData', '$RECYCLE.BIN', 'System Volume Information')
 
 # Arquivos temporários: bloqueio do Office (~$...), downloads incompletos, miniaturas.
 $script:ExcluirArquivosPadrao = @('~$*', '*.tmp', 'Thumbs.db', '*.crdownload', '*.part', '*.partial')

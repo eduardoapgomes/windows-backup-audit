@@ -47,6 +47,10 @@ jobs:
             $msg = ($b.ErrorRecord | ForEach-Object { $_.Exception.Message + ' @ ' + $_.ScriptStackTrace }) -join ' | '
             Write-Host ("::error title={0}::{1}" -f (EscapeProp ([string]$b.Name + [string]$b.Item)), (Escape $msg))
           }
+          foreach ($t in @($r.Skipped)) {
+            Write-Host ("::notice title=Ignorado::{0}" -f (Escape $t.ExpandedPath))
+          }
+          Write-Host ("::notice title=Resumo::{0} passaram, {1} falharam, {2} ignorados" -f $r.PassedCount, $r.FailedCount, $r.SkippedCount)
           if ($r.Result -ne 'Passed') { exit 1 }
       - name: Desempenho (versão 2 x versão 1)
         if: matrix.shell == 'powershell'
