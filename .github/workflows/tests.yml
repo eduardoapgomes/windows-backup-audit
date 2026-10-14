@@ -36,9 +36,16 @@ jobs:
           $config.Run.Path = './tests'
           $config.Run.PassThru = $true
           $config.Output.Verbosity = 'Detailed'
+          # Sem as anotações automáticas do Pester: o GitHub guarda só 10 erros por etapa.
+          $config.Output.CIFormat = 'None'
           $r = Invoke-Pester -Configuration $config
           function Escape([string]$t) { $t.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A') }
           function EscapeProp([string]$t) { (Escape $t).Replace(':', '%3A').Replace(',', '%2C') }
+          if ($r.FailedCount) {
+            # Uma anotação com todas as falhas (nome e primeira linha da mensagem).
+            $todas = @($r.Failed | ForEach-Object { '{0} => {1}' -f $_.ExpandedPath, (@($_.ErrorRecord)[0].Exception.Message -split "`n")[0] }) -join "`n"
+            Write-Host ("::error title=Falhas ({0})::{1}" -f $r.FailedCount, (Escape $todas))
+          }
           foreach ($t in @($r.Failed)) {
             $msg = ($t.ErrorRecord | ForEach-Object { $_.Exception.Message + ' @ ' + $_.ScriptStackTrace }) -join ' | '
             Write-Host ("::error title={0}::{1}" -f (EscapeProp $t.ExpandedPath), (Escape $msg))
