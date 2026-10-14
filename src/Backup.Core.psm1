@@ -462,6 +462,10 @@ function Invoke-BackupWBA {
     $inicio = Get-Date
     $origens = @($Config.Origens)
     $caminhosOrigem = [string[]]@($origens | ForEach-Object { $_.Caminho })
+    foreach ($o in $origens) {
+        # Sem nome, a cópia iria para a raiz da pasta de backup, misturada com _CONTROLE.
+        if (-not $o.Nome) { throw "Origem sem nome na configuração: $($o.Caminho)" }
+    }
     Clear-CacheDisco
     $disco = Assert-DestinoSeguro $Destino $caminhosOrigem
     $Destino = $Destino.TrimEnd('\', '/')

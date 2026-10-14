@@ -243,6 +243,7 @@ Describe 'Backup de ponta a ponta' {
         $texto = New-TextoConfig -Destino $destino -Origens @([pscustomobject]@{ Caminho = $origem; Nome = 'Origem' }) `
             -ExcluirPastas @('node_modules', '*~1')
         $config = ConvertFrom-TextoConfig $texto -Arquivo 'teste'
+        Assert-Configuracao $config
         $v = [WindowsBackupAudit.Nativo]::Varrer($origem, [WindowsBackupAudit.Filtro]::new([string[]]$config.ExcluirPastas, [string[]]$config.ExcluirArquivos), $true)
         $v.ArquivosNomeCurto | Should -Contain 'lib\script.tmpl'
         $v.PastasNomeCurto | Should -Contain 'Pasta Com Nome Longo'
