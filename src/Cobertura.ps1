@@ -24,6 +24,8 @@ foreach ($par in @(
 $script:TipoCritico = 'Carteira, senha, chave ou e-mail'
 $script:ExtensoesCriticas = @('.kdbx', '.kdb', '.pst', '.ppk', '.wallet', '.keystore')
 $script:NomesCriticos = @('wallet.dat', 'id_rsa', 'id_ed25519', 'id_ecdsa', 'secring.gpg', 'pubring.kbx')
+# Nomes que parecem críticos mas são internos de programas (OneDrive guarda general.keystore nos logs).
+$script:NomesNaoCriticos = @('general.keystore')
 
 # Pastas da raiz dos discos que são do Windows ou de programas.
 $script:PastasDoSistema = @('Windows', 'Program Files', 'Program Files (x86)', 'ProgramData', 'Users',
@@ -36,6 +38,7 @@ function Get-TipoPessoal {
     param([Parameter(Mandatory)][string]$Nome, [switch]$SoCriticos)
     $nome = [IO.Path]::GetFileName($Nome).ToLowerInvariant()
     $ext = [IO.Path]::GetExtension($nome)
+    if ($script:NomesNaoCriticos -contains $nome) { return $null }
     if ($script:NomesCriticos -contains $nome -or $script:ExtensoesCriticas -contains $ext) { return $script:TipoCritico }
     if ($SoCriticos -or -not $ext) { return $null }
     return $script:TiposPessoais[$ext]

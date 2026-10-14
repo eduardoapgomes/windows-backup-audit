@@ -67,6 +67,8 @@ Describe 'Arquivos fora do backup' {
         Get-TipoPessoal 'x\Relatório Final.DOCX' | Should -Be 'Documento'
         Get-TipoPessoal 'wallet.dat' | Should -Match 'Carteira'
         Get-TipoPessoal 'senhas.kdbx' -SoCriticos | Should -Match 'Carteira'
+        Get-TipoPessoal 'bisq_BTC.wallet' -SoCriticos | Should -Match 'Carteira'
+        Get-TipoPessoal 'logs\general.keystore' -SoCriticos | Should -BeNullOrEmpty
         Get-TipoPessoal 'foto.jpg' -SoCriticos | Should -BeNullOrEmpty
         Get-TipoPessoal 'programa.exe' | Should -BeNullOrEmpty
         Get-TipoPessoal 'LEIAME' | Should -BeNullOrEmpty
