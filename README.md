@@ -107,9 +107,11 @@ Medição no Windows do CI (1.504 arquivos, 112 MB, mesmo SSD; a checagem físic
 
 | | Versão 1 | Versão 2 |
 |---|---:|---:|
-| Primeiro backup | 131 s | **6,7 s** |
-| Sem mudanças | 55 s | **0,1 s** |
-| 10 arquivos alterados | 56 s | **0,3 s** |
+| Primeiro backup | 67 s | **11,2 s** |
+| Sem mudanças | 23 s | **0,1 s** |
+| 10 arquivos alterados | 23 s | **0,3 s** |
+
+Desde a 2.0.1 a cópia é conferida lendo o próprio disco, sem o cache do Windows: o primeiro backup ficou alguns segundos mais lento nessa medição (era 6,7 s), em troca de o SHA-256 confirmar o que foi gravado de fato.
 
 Com um HD USB, o primeiro backup é limitado pela velocidade de gravação do HD; as execuções seguintes continuam rápidas porque só leem o que mudou. Reproduza com `tests\Comparar-Desempenho.ps1`.
 

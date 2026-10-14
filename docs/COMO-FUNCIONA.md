@@ -70,7 +70,7 @@ O que mais custava tempo na versão 1 era, para **cada arquivo**: consultar o Wi
 8. **Pasta renomeada é movida dentro do HD**, sem copiar gigabytes de novo.
 9. **Exclusões por nome** (`node_modules`, `__pycache__`, `.venv`, `site-packages`…) cortam a árvore inteira na listagem e no Robocopy. Em um computador real, os ambientes virtuais Python eram 94% dos arquivos de uma pasta de projetos (214 mil de 228 mil).
 
-Resultado medido no CI (`tests\Comparar-Desempenho.ps1`, 1.504 arquivos e 112 MB): primeiro backup **6,7 s** (versão 1: 131 s), execução sem mudanças **0,1 s** (55 s), 10 arquivos alterados **0,3 s** (56 s). Na versão 1 a checagem de disco por arquivo foi simulada, então o custo real dela era ainda maior.
+Resultado medido no CI (`tests\Comparar-Desempenho.ps1`, 1.504 arquivos e 112 MB): primeiro backup **11,2 s** (versão 1: 67 s), execução sem mudanças **0,1 s** (23 s), 10 arquivos alterados **0,3 s** (23 s). O primeiro backup inclui ler cada cópia do disco, sem cache (antes da 2.0.1, 6,7 s). Na versão 1 a checagem de disco por arquivo foi simulada, então o custo real dela era ainda maior.
 
 ## Por que é seguro
 
