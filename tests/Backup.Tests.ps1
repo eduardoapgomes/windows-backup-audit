@@ -250,6 +250,8 @@ Describe 'Backup de ponta a ponta' {
         $r.Situacao | Should -Be 'OK'
         Get-Soma $r 'Copiados' | Should -Be 3
         $copia = Join-Path $destino 'Origem'
+        $arvore = (Get-ChildItem -LiteralPath $destino -Recurse -Force | ForEach-Object { $_.FullName.Substring($destino.Length) }) -join '; '
+        Test-Path -LiteralPath (Join-Path $copia 'lib\script.tmpl') | Should -BeTrue -Because "no HD: $arvore"
         [IO.File]::ReadAllText((Join-Path $copia 'lib\script.tmpl')) | Should -Be 'modelo'
         [IO.File]::ReadAllText((Join-Path $copia 'Pasta Com Nome Longo\dentro.txt')) | Should -Be 'dentro'
         [IO.File]::ReadAllText((Join-Path $copia 'Pasta Com Nome Longo\outro.tmpl')) | Should -Be 'outro'
