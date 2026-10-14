@@ -8,6 +8,7 @@ Correções a partir do primeiro backup real (257 mil arquivos, 45 GB).
 - **Pausas no meio do backup**: um clique na janela (Edição Rápida do console) pausava o programa até apertar uma tecla, e o computador podia suspender. Durante backup e verificação a Edição Rápida fica desligada e o Windows é avisado para não suspender.
 - **Conferência lê do HD, não do cache**: a cópia é lida com `FILE_FLAG_NO_BUFFERING`, para o SHA-256 confirmar o que foi gravado no disco.
 - **Motivo de cada falha do Robocopy** no relatório (por exemplo, “o arquivo estava em uso por outro programa”), lido do log.
+- **Verificar integridade lista cada arquivo conferido** em `detalhes.tsv` (situação `OK` ou `PROBLEMA`, com o SHA-256), não só os problemas.
 - **`site-packages` excluído por padrão** em configurações novas: bibliotecas Python reinstaláveis eram 94% dos arquivos de uma pasta de projetos. Em configurações existentes, acrescente a linha em `[EXCLUIR_PASTAS]`.
 
 ## 2.0.0 — versão simplificada

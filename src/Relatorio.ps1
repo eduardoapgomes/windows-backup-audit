@@ -175,7 +175,7 @@ function Write-RelatorioVerificacao {
     $corpo = "<section class=""faixa""><h1 class=""selo"">$(ConvertTo-TextoHtml $titulo)</h1><p>$(ConvertTo-TextoHtml $texto)</p></section>" +
         "<section>$(Get-InfoDestinoHtml $Destino $Disco $Inicio)</section>" +
         '<section><h2>Pastas</h2>' + (New-TabelaHtml @('Pasta no backup', 'Arquivos registrados', 'Conferidos OK', 'Lidos', 'Com problema') $tabela.ToArray() @(1, 2, 3, 4)) +
-        '<p class="suave">A lista de problemas está em <a href="detalhes.tsv">detalhes.tsv</a>.</p></section>'
+        '<p class="suave">Cada arquivo conferido está em <a href="detalhes.tsv">detalhes.tsv</a> (abre no Excel), com o SHA-256: situação <b>OK</b> ou <b>PROBLEMA</b>.</p></section>'
     $caminho = Join-Path $Execucao 'RELATORIO.html'
     Save-Html $caminho (New-PaginaHtml $titulo $Situacao $corpo)
     [ordered]@{ Programa = "windows-backup-audit $script:Versao"; Tipo = 'Verificacao'; Situacao = $Situacao; Falha = $Falha

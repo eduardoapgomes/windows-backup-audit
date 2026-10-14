@@ -160,6 +160,10 @@ Describe 'Backup de ponta a ponta' {
         $v = Invoke-VerificacaoWBA -Destino $c.Destino
         $v.Situacao | Should -Be 'ERROS'
         $v.Erros | Should -Be 1
+        # detalhes.tsv registra cada arquivo conferido, não só os problemas.
+        $d = Import-Csv -LiteralPath (Join-Path (Split-Path $v.Relatorio) 'detalhes.tsv') -Delimiter "`t"
+        @($d | Where-Object situacao -eq 'OK').Count | Should -Be 5
+        @($d | Where-Object situacao -eq 'PROBLEMA')[0].caminho | Should -Be 'Sub pasta\b.txt'
         $r = Invoke-Teste $c
         Get-Soma $r 'Atualizados' | Should -Be 1
         (Invoke-VerificacaoWBA -Destino $c.Destino).Situacao | Should -Be 'OK'

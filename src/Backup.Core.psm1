@@ -751,7 +751,10 @@ function Invoke-VerificacaoWBA {
                 for ($i = 0; $i -lt $n; $i++) {
                     $reg = $lote.Itens[$i]; $r = $resultados[$i]
                     $feitos++
-                    if ($r.Ok) { $ok++; $bytes += $reg.Bytes; $reg.Verificado = $agora }
+                    if ($r.Ok) {
+                        $ok++; $bytes += $reg.Bytes; $reg.Verificado = $agora
+                        Add-Detalhe $detalhes 'OK' $nome $reg.Relativo $reg.Bytes $reg.Sha256
+                    }
                     else {
                         $ruins++
                         [void]$m.Registros.Remove($reg.Relativo)
