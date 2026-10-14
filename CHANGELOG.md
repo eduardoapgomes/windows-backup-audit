@@ -4,6 +4,7 @@
 
 Correções a partir do primeiro backup real (257 mil arquivos, 45 GB).
 
+- **`ferramentas\Sair-de-tudo.ps1`**: antes de passar o PC para outra pessoa, apaga os logins deste usuário (navegadores, Gerenciador de Credenciais, Office, WhatsApp, Telegram, Discord, Teams, tokens de desenvolvimento) sem tocar nos arquivos. Sem `-Executar`, só simula.
 - **Procurar arquivos fora do backup** (menu 8, `-Acao Cobertura`): lista, por pasta, documentos, fotos e código fora de `[ORIGENS]`; em `AppData` e nas pastas ocultas do perfil, aponta carteiras, cofres de senha, chaves e `.pst`. Não precisa do HD.
 - **Arquivos pulados pelo nome curto 8.3**: o Robocopy compara as exclusões também com o nome curto, e `script.tmpl` (`SCRIPT~1.TMP`) era pulado por causa de `*.tmp` e aparecia como erro. A listagem agora lê o nome curto e esses itens são copiados numa segunda passada.
 - **Pausas no meio do backup**: um clique na janela (Edição Rápida do console) pausava o programa até apertar uma tecla, e o computador podia suspender. Durante backup e verificação a Edição Rápida fica desligada e o Windows é avisado para não suspender.
